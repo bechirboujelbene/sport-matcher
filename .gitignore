@@ -380,3 +380,12 @@ sketch
 
 # Generated Ansible inventory
 ansible/inventory.ini
+
+# Project secrets and local overrides
+.env.*
+!.env.example
+**/secrets.env
+**/*secret*.local.yaml
+**/*secrets*.local.yaml
+**/kubeconfig
+**/inventory.local.ini

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
+import { useAuth } from '../auth/AuthContext';
 import Header from '../components/Header';
-import { useNotification } from '../contexts/NotificationContext';
+import { useNotification } from '../contexts/useNotification';
 import '../styles/ProfilePage.css';
+import { API_URL, isDemoMode, apiFetch } from '../config';
 
 const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const timeSlots = ['Morning (6-12 PM)', 'Afternoon (12-6 PM)', 'Evening (6-10 PM)'];
@@ -23,13 +24,9 @@ const allSports = ['Hiking', 'Running', 'Cycling', 'Swimming', 'Tennis', 'Basket
 const otherSports = ['Soccer', 'Baseball', 'Skiing', 'Snowboarding', 'Skateboarding', 'Surfing', 'Rowing', 'Boxing', 'Martial Arts', 'Climbing', 'Golf', 'Dancing', 'Yoga', 'Pilates', 'CrossFit', 'Weightlifting', 'Badminton', 'Table Tennis', 'Horseback Riding', 'Fencing'];
 const skillLevels = ['Beginner', 'Intermediate', 'Advanced'];
 
-// API URL configuration for different environments
-// Docker: Frontend on :3000, nginx gateway on :80
-// Kubernetes: Frontend and API on separate domains
-const API_URL = (window.location.hostname === 'localhost' ? 'http://localhost:80' : `https://api.${window.location.hostname}`);
 
 function ProfilePage() {
-    const { user, getAccessTokenSilently } = useAuth0();
+    const { user, getAccessTokenSilently } = useAuth();
     const { notify } = useNotification();
     const [original, setOriginal] = useState(null);
     const [form, setForm] = useState(initialState);
@@ -55,43 +52,6 @@ function ProfilePage() {
         }
     }, [user]);
 
-    // Helper to fetch profile from backend
-    const fetchProfile = async () => {
-        if (!user) return;
-        try {
-            const token = await getAccessTokenSilently();
-            const res = await fetch(`${API_URL}/user/${encodeURIComponent(user.sub)}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) return;
-            const data = await res.json();
-            const nameParts = (data.name || '').split(' ');
-            setForm(prev => {
-                const next = {
-                    ...prev,
-                    firstName: nameParts[0] || '',
-                    lastName: nameParts.slice(1).join(' '),
-                    email: data.email || prev.email,
-                    bio: data.bio || '',
-                    skillLevel: data.skillLevel || '',
-                    sports: data.sportInterests || [],
-                    availability: { ...initialState.availability, ...(data.availability || {}) },
-                    avatar: data.picture || prev.avatar,
-                };
-                setOriginal(next);
-                return next;
-            });
-            if (data.sportInterests) {
-                setExtraSports(() => {
-                    const extras = data.sportInterests.filter((s) => !allSports.includes(s));
-                    return extras;
-                });
-            }
-        } catch (e) {
-            // eslint-disable-next-line no-console
-            console.error('Failed to fetch user profile', e);
-        }
-    };
 
     // fetch full profile from backend
     useEffect(() => {
@@ -99,7 +59,7 @@ function ProfilePage() {
         (async () => {
             try {
                 const token = await getAccessTokenSilently();
-                const res = await fetch(`${API_URL}/user/${encodeURIComponent(user.sub)}`, {
+                const res = await apiFetch(`${API_URL}/user/${encodeURIComponent(user.sub)}`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 if (!res.ok) return;
@@ -124,7 +84,6 @@ function ProfilePage() {
                     });
                 }
             } catch (e) {
-                // eslint-disable-next-line no-console
                 console.error('Failed to fetch user profile', e);
             }
         })();
@@ -136,7 +95,7 @@ function ProfilePage() {
         (async () => {
             try {
                 const token = await getAccessTokenSilently();
-                const res = await fetch(`${API_URL}/location/${encodeURIComponent(user.sub)}`, {
+                const res = await apiFetch(`${API_URL}/location/${encodeURIComponent(user.sub)}`, {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     },
@@ -144,6 +103,11 @@ function ProfilePage() {
                 if (!res.ok) return;
                 const data = await res.json(); // { latitude, longitude }
                 const { latitude, longitude } = data;
+                if (isDemoMode) {
+                    setLocation({ lat: latitude, lon: longitude, address: 'Munich, Germany' });
+                    setForm(prev => ({ ...prev, location: 'Munich, Germany' }));
+                    return;
+                }
                 let address = '';
                 if (latitude && longitude) {
                     try {
@@ -163,17 +127,16 @@ function ProfilePage() {
                             setLocation({ lat: latitude, lon: longitude, address: formatted || address, raw: address });
                             setForm(prev => ({ ...prev, location: formatted || address }));
                         }
-                    } catch (_) {
+                    } catch {
                         // ignore geocode errors
                     }
 
                 }
             } catch (e) {
-                // eslint-disable-next-line no-console
                 console.error('Failed to load location', e);
             }
         })();
-    }, [user]);
+    }, [user, getAccessTokenSilently]);
 
     // basic validation requirements
     const isValid = React.useMemo(() => {
@@ -186,10 +149,9 @@ function ProfilePage() {
     // determine if form differs from original (ignore email as it is read-only)
     const isDirty = React.useMemo(() => {
         if (!original) return false;
-        const stripReadOnly = (obj = {}) => {
-            const { email, location, ...rest } = obj;
-            return rest;
-        };
+        const stripReadOnly = (obj = {}) => Object.fromEntries(
+            Object.entries(obj).filter(([key]) => !['email', 'location'].includes(key))
+        );
         return JSON.stringify(stripReadOnly(form)) !== JSON.stringify(stripReadOnly(original));
     }, [form, original]);
 
@@ -233,7 +195,6 @@ function ProfilePage() {
             notify({ type: 'error', message: `Please provide ${issues.join(', ')}` });
             return;
         }
-        e.preventDefault();
         try {
             const token = await getAccessTokenSilently();
             const body = {
@@ -244,7 +205,7 @@ function ProfilePage() {
                 availability: form.availability,
                 sports: form.sports,
             };
-            const res = await fetch(`${API_URL}/user/${user.sub}`, {
+            const res = await apiFetch(`${API_URL}/user/${encodeURIComponent(user.sub)}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -255,7 +216,6 @@ function ProfilePage() {
             if (!res.ok) throw new Error(`Failed: ${res.status}`);
             notify({ type: 'success', message: 'Profile saved!' });
         } catch (err) {
-            // eslint-disable-next-line no-console
             console.error('Save failed', err);
             notify({ type: 'error', message: 'Save failed' });
         }

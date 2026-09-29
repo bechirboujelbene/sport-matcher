@@ -30,19 +30,30 @@ spec:
         - name: location-service
           securityContext:
             {{- .Values.locationService.securityContext | toYaml | nindent 12 }}
-          image: "{{ .Values.ghcr.registry }}/{{ .Values.ghcr.organization }}/{{ .Values.locationService.image.repository }}:{{ .Values.locationService.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.ghcr.registry }}/{{ .Values.ghcr.organization }}/{{ .Values.ghcr.project }}/{{ .Values.locationService.image.repository }}:{{ .Values.locationService.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http
               containerPort: {{ .Values.locationService.service.port }}
               protocol: TCP
           env:
+          - name: INTERNAL_SERVICE_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.internalAuth.secretName }}
+                key: INTERNAL_SERVICE_TOKEN
           - name: SPRING_DATASOURCE_URL
             value: "jdbc:postgresql://postgres-service:5432/location_service_db"
           - name: SPRING_DATASOURCE_USERNAME
-            value: "admin"
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.postgres.secretName }}
+                key: POSTGRES_USER
           - name: SPRING_DATASOURCE_PASSWORD
-            value: "your_secure_password"
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.postgres.secretName }}
+                key: POSTGRES_PASSWORD
           livenessProbe:
             httpGet:
               path: /api/actuator/health

@@ -39,30 +39,24 @@ prometheus:
           - targets: ['genai:8000'] 
 grafana:
   smtp:
-    enabled: true
-    host: "smtp.example.com:587"
-    user: "your-email@example.com"
-    from_address: "grafana@example.com"
+    enabled: false
+    host: ""
+    user: ""
+    from_address: ""
     from_name: "Grafana Alerts"
     existingSecret: "grafana-smtp-secret"
     secretKey: "GF_SMTP_PASSWORD"
 
   image:
     repository: grafana/grafana-oss
-    tag: latest
+    tag: "11.1.0"
   service:
     type: ClusterIP
     port: 3000
   provisioning:
     notifiers:
-      enabled: true
-      config:
-        - name: 'Evil Jenkins hook'
-          type: 'webhook'
-          uid: 'my-webhook-notifier' #
-          is_default: true
-          settings:
-            url: 'https://webhook.site/e1a8849e-2dcd-4164-ab7b-94495b56039f'
+      enabled: false
+      config: []
 
     enabled: true
     datasource:
@@ -85,10 +79,10 @@ ingress:
     kubernetes.io/ingress.class: "nginx"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
   hosts:
-    grafana: "grafana-team-evil-jenkins.student.k8s.aet.cit.tum.de"
-    prometheus: "prometheus-team-evil-jenkins.student.k8s.aet.cit.tum.de"
+    grafana: "grafana.sport-matcher.example.com"
+    prometheus: "prometheus.sport-matcher.example.com"
   tls:
     - secretName: monitoring-tls-secret
       hosts:
-        - grafana-team-evil-jenkins.student.k8s.aet.cit.tum.de
-        - prometheus-team-evil-jenkins.student.k8s.aet.cit.tum.de
+        - grafana.sport-matcher.example.com
+        - prometheus.sport-matcher.example.com

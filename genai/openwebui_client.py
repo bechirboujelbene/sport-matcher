@@ -12,14 +12,6 @@ import requests
 
 import config
 
-HEADERS = {
-    "Authorization": f"Bearer {config.OPENWEBUI_API_KEY}",
-    "Content-Type": "application/json",
-}
-
-ENDPOINT = config.OPENWEBUI_URL.rstrip("/") + "/api/chat/completions"
-
-
 def rank_candidates(user: dict, candidates: List[dict], top_k: int | None = None) -> List[dict]:
     """Ask the LLM to rank `candidates` for the active user (as a structured dict).
 
@@ -38,6 +30,9 @@ def rank_candidates(user: dict, candidates: List[dict], top_k: int | None = None
     List[dict]
         Ordered list of match objects (id, score, explanation, common_preferences).
     """
+    if not config.OPENWEBUI_URL or not config.OPENWEBUI_API_KEY:
+        raise RuntimeError("Open WebUI configuration is required when MATCHING_BACKEND=openwebui")
+
     if top_k is None:
         top_k = config.TOP_K_MATCHES
 
@@ -73,16 +68,19 @@ def rank_candidates(user: dict, candidates: List[dict], top_k: int | None = None
         "temperature": 0.2,
     }
 
-    resp = requests.post(ENDPOINT, json=payload, headers=HEADERS, timeout=config.REQUEST_TIMEOUT_SECONDS)
+    endpoint = config.OPENWEBUI_URL.rstrip("/") + "/api/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {config.OPENWEBUI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(endpoint, json=payload, headers=headers, timeout=config.REQUEST_TIMEOUT_SECONDS)
     resp.raise_for_status()
 
     content = resp.json()["choices"][0]["message"]["content"].strip()
     # Expect pure JSON list.  If the model wrapped it in markdown, try to strip.
     # The model has been instructed to output ONLY a JSON array.  No fences expected.
-    print("RAW LLM content:", content[:400])
     try:
         matches = json.loads(content)
         return matches[:top_k]
     except json.JSONDecodeError as exc:
-        # Surface the error – downstream service should respond 500 so we notice.
-        raise ValueError(f"GenAI did not return strict JSON array: {content}") from exc
+        raise ValueError("GenAI returned malformed JSON") from exc

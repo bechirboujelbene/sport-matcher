@@ -18,7 +18,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(LocationController.class)
+@WebMvcTest(value = LocationController.class, properties = "INTERNAL_SERVICE_TOKEN=test-service-token")
 class LocationControllerTest {
 
     @Autowired
@@ -42,6 +42,7 @@ class LocationControllerTest {
         when(locationMapper.toDTO(location)).thenReturn(new LocationDTO(userId, latitude, longitude));
 
         mockMvc.perform(post("/location/update")
+                        .header("X-User-Id", userId)
                         .param("userId", userId) 
                         .param("latitude", String.valueOf(latitude))
                         .param("longitude", String.valueOf(longitude)))
@@ -52,15 +53,44 @@ class LocationControllerTest {
     }
 
     @Test
+    void testUpdateLocationRejectsMismatchedIdentity() throws Exception {
+        mockMvc.perform(post("/location/update")
+                        .header("X-User-Id", "attacker")
+                        .param("userId", "user1")
+                        .param("latitude", "48.13")
+                        .param("longitude", "11.57"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testUpdateLocationRejectsMissingIdentity() throws Exception {
+        mockMvc.perform(post("/location/update")
+                        .param("userId", "user1")
+                        .param("latitude", "48.13")
+                        .param("longitude", "11.57"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void testGetAllLocationsRejectsInvalidServiceToken() throws Exception {
+        mockMvc.perform(get("/location/all")
+                        .header("X-Service-Token", "wrong-token"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void testGetAllLocations() throws Exception {
         List<Location> list = List.of(new Location("u1", 0.0, 0.0),
                                            new Location("u2", 1.0, 1.0));
         when(locationService.getAll()).thenReturn(list);
+        when(locationMapper.toDTO(list.get(0))).thenReturn(new LocationDTO("u1", 0.0, 0.0));
+        when(locationMapper.toDTO(list.get(1))).thenReturn(new LocationDTO("u2", 1.0, 1.0));
 
-        mockMvc.perform(get("/location/all"))
+        mockMvc.perform(get("/location/all")
+                        .header("X-Service-Token", "test-service-token"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value("u1"))
-                .andExpect(jsonPath("$[1].id").value("u2"));
+                .andExpect(jsonPath("$[0].userId").value("u1"))
+                .andExpect(jsonPath("$[1].userId").value("u2"));
     }
 
     @Test
@@ -68,9 +98,40 @@ class LocationControllerTest {
         Location alice = new Location("user1", 48.13, 11.57);
         when(locationService.getLocation("user1")).thenReturn(alice);
 
-        mockMvc.perform(get("/location/user1"))
+        when(locationMapper.toDTO(alice)).thenReturn(new LocationDTO("user1", 48.13, 11.57));
+
+        mockMvc.perform(get("/location/user1")
+                        .header("X-User-Id", "user1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.name").value("Alice"));
+                .andExpect(jsonPath("$.userId").value("user1"));
+    }
+
+    @Test
+    void testGetLocationByIdRejectsMismatchedIdentity() throws Exception {
+        mockMvc.perform(get("/location/user1")
+                        .header("X-User-Id", "attacker"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testGetLocationByIdAllowsServiceToken() throws Exception {
+        Location alice = new Location("user1", 48.13, 11.57);
+        when(locationService.getLocation("user1")).thenReturn(alice);
+        when(locationMapper.toDTO(alice)).thenReturn(new LocationDTO("user1", 48.13, 11.57));
+
+        mockMvc.perform(get("/location/user1")
+                        .header("X-Service-Token", "test-service-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value("user1"));
+    }
+
+    @Test
+    void testNearbyRejectsInvalidServiceToken() throws Exception {
+        mockMvc.perform(get("/location/nearby")
+                        .header("X-Service-Token", "wrong-token")
+                        .param("userId", "user1")
+                        .param("radius", "10"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -82,11 +143,11 @@ class LocationControllerTest {
         when(locationService.searchPartnerByArea(userId, radius)).thenReturn(nearbyUserIds);
 
         mockMvc.perform(get("/location/nearby")
-                        .param("latitude", "48.13")
-                        .param("longitude", "11.57")
-                        .param("radius", "5.0"))
+                        .header("X-Service-Token", "test-service-token")
+                        .param("userId", userId)
+                        .param("radius", String.valueOf(radius)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value("u1"));
+                .andExpect(jsonPath("$[0]").value("user2"));
     }
 }
 

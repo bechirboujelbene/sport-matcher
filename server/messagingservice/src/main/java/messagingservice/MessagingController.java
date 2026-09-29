@@ -11,9 +11,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 
 import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import jakarta.validation.Valid;
 import messagingservice.dto.SendMessageRequest;
+import model.AuthHeaders;
 import messagingservice.entity.MessageEntity;
 
 @RestController
@@ -32,7 +34,14 @@ public class MessagingController {
     @PostMapping("/send")
     public ResponseEntity<?> sendMessage(
             @Parameter(description = "Request payload containing sender, receiver and content")
-            @Valid @RequestBody SendMessageRequest req) {
+            @Valid @RequestBody SendMessageRequest req,
+            @RequestHeader(value = AuthHeaders.USER_ID, required = false) String authenticatedUserId) {
+        if (!AuthHeaders.isAuthenticatedUser(authenticatedUserId)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication required");
+        }
+        if (!AuthHeaders.isSameUser(authenticatedUserId, req.getFromUserId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Cannot send a message as another user");
+        }
         return ResponseEntity.ok(messagingService.sendMessage(req.getFromUserId(), req.getToUserId(), req.getContent()));
     }
 
@@ -47,19 +56,43 @@ public class MessagingController {
             @Parameter(description = "First user ID") @RequestParam String userA,
             @Parameter(description = "Second user ID") @RequestParam String userB,
             @Parameter(description = "Page number (zero-based)") @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "Page size") @RequestParam(defaultValue = "50") int size) {
+            @Parameter(description = "Page size") @RequestParam(defaultValue = "50") int size,
+            @RequestHeader(value = AuthHeaders.USER_ID, required = false) String authenticatedUserId) {
+        if (!AuthHeaders.isAuthenticatedUser(authenticatedUserId)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication required");
+        }
+        if (!authenticatedUserId.equals(userA) && !authenticatedUserId.equals(userB)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Cannot read another user's conversation");
+        }
         return ResponseEntity.ok(messagingService.getConversation(userA, userB, page, size));
     }
 
     @Operation(summary = "Add another user to contact list")
     @PostMapping("/contact")
-    public ResponseEntity<?> addContact(@RequestParam String userId, @RequestParam String contactId) {
+    public ResponseEntity<?> addContact(
+            @RequestParam String userId,
+            @RequestParam String contactId,
+            @RequestHeader(value = AuthHeaders.USER_ID, required = false) String authenticatedUserId) {
+        if (!AuthHeaders.isAuthenticatedUser(authenticatedUserId)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication required");
+        }
+        if (!AuthHeaders.isSameUser(authenticatedUserId, userId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Cannot modify another user's contacts");
+        }
         return ResponseEntity.ok(messagingService.addContact(userId, contactId));
     }
 
     @Operation(summary = "Get all contacts of a user")
     @GetMapping("/contacts/{userId}")
-    public ResponseEntity<?> getContacts(@PathVariable String userId) {
+    public ResponseEntity<?> getContacts(
+            @PathVariable String userId,
+            @RequestHeader(value = AuthHeaders.USER_ID, required = false) String authenticatedUserId) {
+        if (!AuthHeaders.isAuthenticatedUser(authenticatedUserId)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication required");
+        }
+        if (!AuthHeaders.isSameUser(authenticatedUserId, userId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Cannot read another user's contacts");
+        }
         return ResponseEntity.ok(messagingService.getContacts(userId));
     }
 }

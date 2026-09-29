@@ -1,0 +1,66 @@
+name: Deploy Demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'client/**'
+      - '.github/workflows/deploy_demo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy-demo:
+    name: Build demo client and deploy to Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ./client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./client
+
+      # Demo mode serves fixture data from the browser; Auth0 still gates sign-in.
+      - name: Build demo client
+        run: npm run build -- --base=/${{ github.event.repository.name }}/
+        working-directory: ./client
+        env:
+          VITE_DEMO_MODE: 'true'
+          VITE_AUTH_MODE: ${{ vars.DEMO_AUTH_MODE || 'auth0' }}
+          VITE_AUTH0_DOMAIN: ${{ vars.AUTH0_DOMAIN }}
+          VITE_AUTH0_CLIENT_ID: ${{ vars.AUTH0_CLIENT_ID }}
+          VITE_AUTH0_AUDIENCE: ${{ vars.AUTH0_AUDIENCE }}
+
+      - name: Add SPA fallback for client-side routes
+        run: cp client/dist/index.html client/dist/404.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./client/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,9 +1,7 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useRef, useState } from 'react';
 import Notification from '../components/Notification';
 
 const NotificationContext = createContext({ /* default */ });
-
-export const useNotification = () => useContext(NotificationContext);
 
 let idCounter = 0;
 

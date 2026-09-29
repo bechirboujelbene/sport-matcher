@@ -1,15 +1,17 @@
 """FastAPI router exposing matchmaking endpoint for other services."""
 from __future__ import annotations
 
-from typing import List, Dict, Any, Optional
+import logging
+from typing import List, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from matching_engine import MatchingEngine
 
 router = APIRouter(prefix="/genai", tags=["GenAI Matching"])
 engine = MatchingEngine()
+logger = logging.getLogger(__name__)
 
 
 class Candidate(BaseModel):
@@ -19,8 +21,7 @@ class Candidate(BaseModel):
     bio: Optional[str] = Field(default="", description="Bio of the candidate user")
     skillLevel: Optional[str] = Field(default="", description="Skill level of the candidate user")
 
-    class Config:
-        extra = "allow"  # Accept unknown fields (e.g., picture) from backend
+    model_config = ConfigDict(extra="allow")
 
 
 class MatchRequest(BaseModel):
@@ -53,7 +54,8 @@ async def match(req: MatchRequest) -> MatchResponse:  # noqa: D401  (simple func
         ranked = engine.match(user_data, candidates_data)
         return MatchResponse(matches=ranked)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Matching failed: {exc}") from exc
+        logger.exception("Matching failed")
+        raise HTTPException(status_code=500, detail="Matching failed") from exc
 @router.get("/health")
 def health():
     return {"status": "ok"}

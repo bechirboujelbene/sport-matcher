@@ -1,126 +1,66 @@
-# GenAI Microservice
+# GenAI Matching Service
 
-This service provides a REST API for AI-powered user matching using an LLM (via Open WebUI API).
+This FastAPI service ranks candidate sports partners and returns a score, shared preferences, and an explanation. The default engine is deterministic and runs locally without a model download, hosted LLM, API key, or recurring cost. An optional Open WebUI adapter remains available when explicitly configured.
 
-## Features
-- **/genai/match** endpoint: Given a user profile and a list of candidate users, returns a ranked list of structured match objects (with id, score, explanation, and common preferences) using an LLM.
-- Pure FastAPI implementation, ready for containerized deployment.
+## Default matching behavior
 
-## Usage
+The deterministic engine combines sport-interest overlap, skill-level proximity, and profile-bio token overlap. It returns results in stable score/ID order and limits the response using `GENAI_TOP_K`. The weights and matching rules are implemented in `deterministic_matcher.py`; these results are rules-based, not an LLM judgment.
 
-### 1. Environment Variables
-You must supply the following variables (either in a `.env` file or via your orchestrator):
+Set `MATCHING_BACKEND=deterministic` (the default). To select the optional Open WebUI adapter, set `MATCHING_BACKEND=openwebui`, `OPENWEBUI_URL`, and `OPENWEBUI_API_KEY`. The optional adapter is not required by the project demo, local tests, or default deployment configuration.
 
-- `OPENWEBUI_URL` – Base URL of your Open WebUI instance (e.g. `https://gpu.aet.cit.tum.de`)
-- `OPENWEBUI_API_KEY` – Bearer token for Open WebUI API access
+## API
 
+`POST /genai/match`
 
-**Recommended:**
-- Define these in a `.env` file in the **project root** (the same directory as `docker-compose.yml`). Docker Compose will automatically load them for all services.
-
-
-### 2. Build & Run (Docker Compose)
-
-```sh
-docker compose up --build genai
-```
-
-### 3. API Example
-
-#### POST /genai/match
-Request body:
 ```json
 {
-  "user_profile": {"id": "user1", "name": "user", "sportInterests": ["Tennis", "Swimming"], "bio": "I love tennis and swimming", "skillLevel": "Beginner"},
+  "user": {
+    "id": "user-1",
+    "sportInterests": ["Hiking", "Tennis"],
+    "bio": "Weekend hiker",
+    "skillLevel": "Intermediate"
+  },
   "candidates": [
-    {"id": "u1", "name": "Bob", "sportInterests": ["Tennis", "Swimming"], "bio": "I love tennis and swimming", "skillLevel": "Beginner"},
-    {"id": "u2", "name": "Carol", "sportInterests": ["Chess", "Reading"], "bio": "I love chess and reading", "skillLevel": "Beginner"}
+    {
+      "id": "user-2",
+      "sportInterests": ["Hiking"],
+      "bio": "I enjoy hiking on weekends",
+      "skillLevel": "Intermediate"
+    }
   ]
 }
 ```
-Response:
+
+A successful response has this shape:
+
 ```json
 {
   "matches": [
     {
-      "id": "u1",
-      "score": 0.92,
-      "explanation": "Both enjoy tennis",
-      "common_preferences": ["Tennis"]
-    },
-    {
-      "id": "u2",
-      "score": 0.4,
-      "explanation": "No common sports",
-      "common_preferences": []
+      "id": "user-2",
+      "score": 0.525,
+      "explanation": "shared sports: Hiking; compatible skill levels",
+      "common_preferences": ["Hiking"]
     }
   ]
 }
 ```
 
-### 4. Testing
-- See `tests/test_matching.py` for endpoint tests. These check that the `/genai/match` endpoint returns the correct schema (list of match objects with `id`, `score`, `explanation`, `common_preferences`).
-- The output of the LLM is not strictly deterministic; tests validate response structure and types, not exact values.
+Other endpoints: `GET /health` and `GET /metrics`.
 
-### 5. Internal Logic
-- Matching logic is implemented in `matching_engine.py`, which calls `openwebui_client.py` to interact with the LLM API.
-- The LLM is prompted to return only a strict JSON array of match objects.
-- All parsing and error handling is defensive to handle LLM quirks.
+## Local development and tests
 
-### 6. Prompt Design & Data Model
+From the repository root:
 
-The matching prompt is carefully engineered to keep the LLM focused and to guarantee a parse-able response:
-
-1. **System Instruction** – establishes the LLM persona and output contract:
-   ```text
-   You are a matchmaking engine. Return ONLY a valid JSON array. Each element must have
-   id (string), score (float 0-1), explanation (string), common_preferences (string[]). No prose.
-   ```
-2. **User Section** – embeds the request payload as JSON (verbatim). We include:
-   - `user_profile` – full user object.
-   - `candidates` – **array of candidate objects** with all required fields (`id`, `name`, `sportInterests`, `bio`, `skillLevel`, `picture`).
-
-   This is rendered with triple back-ticks so the model treats it as code and does not re-format it.
-
-3. **Few-Shot Example** – a miniature example (one user + two candidates) with the **desired JSON answer**. This anchors the output schema and ordering.
-
-4. **Explicit Rules** – reiterated in bold: *"Return ONLY JSON – do NOT add markdown, explanations, or keys outside the schema."*
-
-**Why this works:**
-- The model sees the schema three times (system, example, rules), drastically reducing chances of hallucinated keys.
-- Using JSON in the prompt avoids the cost of re-serialising Python dataclasses and keeps typing explicit.
-
-### Internal Data Model (Pydantic)
-
-```mermaid
-classDiagram
-    class SkillLevel { <<Enum>> BEGINNER INTERMEDIATE ADVANCED }
-    class Candidate {
-      +string id
-      +string name
-      +string[] sportInterests
-      +string bio
-      +SkillLevel skillLevel
-      +Optional~string~ picture
-    }
-    class Match {
-      +string id
-      +float score
-      +string explanation
-      +string[] common_preferences
-    }
+```bash
+python -m pip install -r genai/requirements.txt
+PYTHONPATH=. python -m pytest genai/tests
 ```
 
-- `extra = "forbid"` is **disabled** to tolerate future fields (e.g., avatar URLs) without breaking requests.
-- Validation happens **before** hitting the LLM so runtime errors never propagate downstream.
-- The returned JSON is validated against the `Match` model; if the LLM drifts, we retry with a harsher system prompt.
+Run the API locally from `genai/`:
 
+```bash
+MATCHING_BACKEND=deterministic uvicorn app:app --reload
+```
 
-## Development
-- Main entrypoint: `app.py` (FastAPI)
-- API routes: `routes/matching.py`
-- LLM logic: `openwebui_client.py`, `matching_engine.py`
-
-## Notes
-- All secrets (API keys) should be kept out of version control. Only commit `.env.example`.
-- For more Open WebUI API info, see: https://docs.openwebui.com/getting-started/api-endpoints/
+The service listens on port 8000 by default. Docker Compose configures the same deterministic backend without requiring external LLM credentials.

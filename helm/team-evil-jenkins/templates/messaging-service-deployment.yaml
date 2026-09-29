@@ -30,19 +30,42 @@ spec:
         - name: messaging-service
           securityContext:
             {{- .Values.messagingService.securityContext | toYaml | nindent 12 }}
-          image: "{{ .Values.ghcr.registry }}/{{ .Values.ghcr.organization }}/{{ .Values.messagingService.image.repository }}:{{ .Values.messagingService.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.ghcr.registry }}/{{ .Values.ghcr.organization }}/{{ .Values.ghcr.project }}/{{ .Values.messagingService.image.repository }}:{{ .Values.messagingService.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http
               containerPort: {{ .Values.messagingService.service.port }}
               protocol: TCP
           env:
+          - name: INTERNAL_SERVICE_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.internalAuth.secretName }}
+                key: INTERNAL_SERVICE_TOKEN
           - name: SPRING_DATASOURCE_URL
             value: "jdbc:postgresql://postgres-service:5432/messaging_service_db"
           - name: SPRING_DATASOURCE_USERNAME
-            value: "admin"
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.postgres.secretName }}
+                key: POSTGRES_USER
           - name: SPRING_DATASOURCE_PASSWORD
-            value: "your_secure_password"
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.postgres.secretName }}
+                key: POSTGRES_PASSWORD
+          - name: AUTH0_DOMAIN
+            valueFrom:
+              secretKeyRef:
+                name: auth0-secrets
+                key: AUTH0_DOMAIN
+          - name: AUTH0_AUDIENCE
+            valueFrom:
+              secretKeyRef:
+                name: auth0-secrets
+                key: AUTH0_AUDIENCE
+          - name: ALLOWED_ORIGINS
+            value: {{ .Values.messagingService.allowedOrigins | quote }}
           livenessProbe:
             httpGet:
               path: /api/actuator/health

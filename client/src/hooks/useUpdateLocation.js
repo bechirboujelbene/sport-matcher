@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
-import { useNotification } from '../contexts/NotificationContext';
+import { useAuth } from '../auth/AuthContext';
+import { useNotification } from '../contexts/useNotification';
+import { API_URL, isDemoMode, apiFetch } from '../config';
 
 /**
- * Continuously send the users geolocation to the Location micro-service.
+ * Continuously send the user's geolocation to the Location micro-service.
  *
  * How it works
  * 1. As soon as the user is authenticated, we start a `navigator.geolocation.watchPosition`
@@ -18,16 +19,12 @@ import { useNotification } from '../contexts/NotificationContext';
  * @param {number} [intervalMs=30000] Fallback heartbeat interval in milliseconds.
  */
 export default function useUpdateLocation(intervalMs = 30_000) {
-    const { isAuthenticated, user, getAccessTokenSilently } = useAuth0();
+    const { isAuthenticated, user, getAccessTokenSilently } = useAuth();
     const { notify } = useNotification();
     const watchIdRef = useRef(null);
-    // API URL configuration for different environments
-    // Docker: Frontend on :3000, nginx gateway on :80
-    // Kubernetes: Frontend and API on separate domains
-    const API_URL = (window.location.hostname === 'localhost' ? 'http://localhost:80' : `https://api.${window.location.hostname}`);
 
     useEffect(() => {
-        if (!isAuthenticated || !user || !('geolocation' in navigator)) return;
+        if (isDemoMode || !isAuthenticated || !user || !('geolocation' in navigator)) return;
 
         let cancelled = false;
 
@@ -40,11 +37,7 @@ export default function useUpdateLocation(intervalMs = 30_000) {
                     latitude: latitude.toString(),
                     longitude: longitude.toString(),
                 }).toString();
-                console.log(qs);
-                console.log('latitude', latitude);
-                console.log('longitude', longitude);
-                console.log('user.sub', user.sub);
-                const response = await fetch(`${API_URL}/location/update?${qs}`, {
+                await apiFetch(`${API_URL}/location/update?${qs}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -52,9 +45,7 @@ export default function useUpdateLocation(intervalMs = 30_000) {
                     },
                 });
             } catch (err) {
-                /* eslint-disable no-console */
                 console.error('Location update failed', err);
-                /* eslint-enable no-console */
             }
 
         }
@@ -62,7 +53,7 @@ export default function useUpdateLocation(intervalMs = 30_000) {
         // Browser live updates
         watchIdRef.current = navigator.geolocation.watchPosition(
             pos => sendLocation(pos.coords),
-            err => notify({ type: 'error', message: 'Geolocation error. Make sure you have enabled location sharing in your browser settings.' }),
+            () => notify({ type: 'error', message: 'Geolocation error. Make sure you have enabled location sharing in your browser settings.' }),
             { enableHighAccuracy: false, maximumAge: 10000, timeout: 20000 },
         );
 
@@ -81,5 +72,5 @@ export default function useUpdateLocation(intervalMs = 30_000) {
                 navigator.geolocation.clearWatch(watchIdRef.current);
             }
         };
-    }, [isAuthenticated, user, getAccessTokenSilently, intervalMs, API_URL]);
+    }, [isAuthenticated, user, getAccessTokenSilently, intervalMs, notify]);
 }

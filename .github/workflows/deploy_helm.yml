@@ -1,5 +1,8 @@
-name: Deploy to Kubernetes via Helm
+name: Deploy to Kubernetes
 
+# Deploys the full Helm release to a Kubernetes cluster provisioned on the
+# runner, then verifies rollout health and upgrade behavior using the images
+# published by the build workflow.
 on:
   workflow_run:
     workflows: ["Build Docker Images"]
@@ -7,52 +10,140 @@ on:
     types:
       - completed
   workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   deploy:
+    name: Deploy and verify release
     runs-on: ubuntu-latest
-    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v3
         with:
-          version: 'v1.30.0'
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Write kubeconfig from secret
+      - name: Resolve image tag and registry path
+        id: img
         run: |
-          echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
-        env:
-          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG_DATA }}
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          OWNER_REPO="${{ github.repository }}"
+          echo "tag=sha-${SHA:0:7}" >> "$GITHUB_OUTPUT"
+          echo "owner=$(echo "${OWNER_REPO%%/*}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "project=$(echo "${OWNER_REPO##*/}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      - name: Set KUBECONFIG env
-        run: echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+      - name: Provision Kubernetes cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: sport-matcher-deploy
 
       - name: Set up Helm
-        uses: azure/setup-helm@v3
+        uses: azure/setup-helm@v4
         with:
           version: v3.14.4
 
-      - name: Create/Update Auth0 K8s Secret
+      - name: Create namespace and image pull secret
         run: |
-          kubectl create secret generic auth0-secrets \
-            --from-literal=AUTH0_CLIENT_ID=${{ secrets.AUTH0_CLIENT_ID }} \
-            --from-literal=AUTH0_CLIENT_SECRET=${{ secrets.AUTH0_CLIENT_SECRET }} \
-            --from-literal=AUTH0_DOMAIN=${{ vars.AUTH0_DOMAIN }} \
-            --from-literal=AUTH0_AUDIENCE=${{ vars.AUTH0_AUDIENCE }} \
-            --from-literal=VITE_AUTH0_DOMAIN=${{ vars.AUTH0_DOMAIN }} \
-            --from-literal=VITE_AUTH0_CLIENT_ID=${{ secrets.AUTH0_CLIENT_ID }} \
-            --from-literal=VITE_AUTH0_AUDIENCE=${{ vars.AUTH0_AUDIENCE }} \
-            -n team-evil-jenkins --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create namespace team-evil-jenkins
+          kubectl -n team-evil-jenkins create secret docker-registry ghcr-creds \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create/Update GenAI K8s Secret
+      - name: Create Auth0 secret
         run: |
-          kubectl create secret generic genai-secrets \
-            --from-literal=OPENWEBUI_URL="${{ vars.OPENWEBUI_URL }}" \
-            --from-literal=OPENWEBUI_API_KEY="${{ secrets.OPENWEBUI_API_KEY }}" \
-            -n team-evil-jenkins --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n team-evil-jenkins create secret generic auth0-secrets \
+            --from-literal=AUTH0_DOMAIN=ci.invalid \
+            --from-literal=AUTH0_AUDIENCE=ci-audience \
+            --from-literal=AUTH0_CLIENT_ID=ci \
+            --from-literal=AUTH0_CLIENT_SECRET=ci
 
-      - name: Helm upgrade/install
+      - name: Helm install
         run: |
-          helm upgrade --install team-evil-jenkins ./helm/team-evil-jenkins -n team-evil-jenkins --set redeploy=$(date +%s) --debug
+          helm upgrade --install sport-matcher ./helm/team-evil-jenkins \
+            -n team-evil-jenkins \
+            --set ghcr.organization=${{ steps.img.outputs.owner }} \
+            --set ghcr.project=${{ steps.img.outputs.project }} \
+            --set client.image.tag=${{ steps.img.outputs.tag }} \
+            --set userService.image.tag=${{ steps.img.outputs.tag }} \
+            --set locationService.image.tag=${{ steps.img.outputs.tag }} \
+            --set matchingService.image.tag=${{ steps.img.outputs.tag }} \
+            --set messagingService.image.tag=${{ steps.img.outputs.tag }} \
+            --set genai.image.tag=${{ steps.img.outputs.tag }} \
+            --set nginxGateway.image.tag=${{ steps.img.outputs.tag }} \
+            --set internalAuth.createSecret=true \
+            --set internalAuth.token=ci-internal-token \
+            --set postgres.createSecret=true \
+            --set postgres.username=ci-user \
+            --set postgres.password=ci-password \
+            --set client.demoMode=true \
+            --set messagingService.allowedOrigins=http://localhost:3000 \
+            --set ingress.enabled=false \
+            --wait --timeout 8m
+
+      - name: Wait for Postgres
+        run: kubectl -n team-evil-jenkins wait --for=condition=ready pod -l app=postgres --timeout=180s
+
+      - name: Verify gateway health
+        run: |
+          kubectl -n team-evil-jenkins port-forward svc/nginx-gateway 18080:80 &
+          PF=$!
+          sleep 5
+          curl -fsS --retry 10 --retry-delay 3 http://localhost:18080/healthz | grep -q 'API Gateway OK'
+          kill $PF
+
+      - name: Verify client runtime config
+        run: |
+          kubectl -n team-evil-jenkins port-forward svc/client 13000:80 &
+          PF=$!
+          sleep 5
+          curl -fsS --retry 10 --retry-delay 3 http://localhost:13000/ -o /dev/null
+          curl -fsS http://localhost:13000/runtime-config.js | grep -q 'VITE_DEMO_MODE'
+          kill $PF
+
+      - name: Verify service health endpoints
+        run: |
+          for svc in user-service location-service matching-service messaging-service; do
+            kubectl -n team-evil-jenkins port-forward svc/$svc 18081:8080 &
+            PF=$!
+            sleep 4
+            curl -fsS --retry 10 --retry-delay 3 http://localhost:18081/api/actuator/health | grep -q '"status":"UP"'
+            kill $PF
+          done
+          kubectl -n team-evil-jenkins port-forward svc/genai 18082:8000 &
+          PF=$!
+          sleep 4
+          curl -fsS --retry 10 --retry-delay 3 http://localhost:18082/health
+          kill $PF
+
+      - name: Helm upgrade (rolling update check)
+        run: |
+          helm upgrade sport-matcher ./helm/team-evil-jenkins \
+            -n team-evil-jenkins \
+            --reuse-values \
+            --set redeploy=$(date +%s) \
+            --wait --timeout 8m
+
+      - name: Verify rollout status after upgrade
+        run: |
+          kubectl -n team-evil-jenkins wait --for=condition=available deployment --all --timeout=180s
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n team-evil-jenkins get pods -o wide || true
+          kubectl -n team-evil-jenkins get events --sort-by=.lastTimestamp | tail -30 || true
+          for pod in $(kubectl -n team-evil-jenkins get pods -o name); do
+            echo "=== $pod ==="
+            kubectl -n team-evil-jenkins describe "$pod" | tail -15 || true
+            kubectl -n team-evil-jenkins logs "$pod" --tail=30 || true
+          done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          helm uninstall sport-matcher -n team-evil-jenkins || true
+          kind delete cluster --name sport-matcher-deploy || true

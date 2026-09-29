@@ -1,172 +1,101 @@
 # Sport Matcher
 
-A platform to connect people for outdoor sports, featuring smart matching (GenAI), messaging, and seamless deployment via Docker, Kubernetes, and AWS.
+Sport Matcher connects people who want to take part in outdoor sports. Users build a profile with sports, skill level, availability, and location, then discover compatible partners and message their contacts.
 
----
+This repository is a fork of the AET-DevOps25 team project and retains its team history. The primary engineering focus here is the delivery and operations path for a containerized microservice application: build, test, package, deploy, and observe the workload reproducibly.
 
-## Table of Contents
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Service Table](#service-table)
-- [Local Development](#local-development)
-- [Kubernetes & Cloud Deployment](#kubernetes--cloud-deployment)
-- [NGINX API Gateway](#nginx-api-gateway)
+## Project status
 
-
----
-
-## Requirements
-
-### Functional Requirements
-- Users can register and log in using Auth0 authentication.
-- Users can create, view, and update their profiles, including uploading an avatar.
-- The system matches users based on sport interests, bio, and skill level using a GenAI-powered engine.
-- Users can view a list of suggested matches and send/receive messages in real time.
-- Location data is used to suggest nearby matches.
-- All user, location, and matching data is persisted in a PostgreSQL database.
-- Admins can monitor system health and metrics via Grafana and Prometheus dashboards.
-
-
-
-### User Stories / Use Cases
-- As a new user, I want to quickly register and set up my profile so I can start finding sports partners.
-- As a user, I want to see a list of people who share my sports interests and live nearby.
-- As a user, I want to chat with my matches in real time.
-- As an admin, I want to monitor the health of all services from a central dashboard.
-
-
-
-## Overview
-
-The core functionality of the application is to connect individuals with shared interests in outdoor sports and physical activities. Users create profiles, share their bio, specify their preferred sports and skill level, and discover potential partners or groups in their area. The platform offers recommendations, matching, and communication tools to reduce the time and effort required to find activity partners.
-
-### Intended Users
-- Amateur outdoor sport enthusiasts
-- Newcomers to a city
-- Busy professionals
-- Sports groups or event organizers
-
-### GenAI Integration
-GenAI enhances user matching by analyzing profiles in a context-aware manner. Instead of relying solely on filters like location or shared interests, GenAI predicts compatibility using LLM-based analysis.
-For more details and setup instructions, see the [GenAI service README](genai/README.md).
-
-### Example Scenarios
-- **New to City:** Lena moves to Munich and wants to find a hiking group. She signs up, selects "hiking," adds her availability, and finds matches.
-- **Busy Professional:** Max wants to stay active but has limited time. He fills out his sports interests and availability, and the platform suggests partners.
-- **Marathon Prep:** Ali is training for a marathon and wants running partners for early mornings. He enters his preferences and finds suitable matches.
-
----
+- The matching service defaults to a deterministic, explainable algorithm with no external LLM dependency.
+- A frontend-only demo uses synthetic data and browser storage; it does not connect to backend services.
+- Local runs authenticate with `AUTH_MODE=dev` — no external accounts required. Production deployments use Auth0 (`AUTH_MODE=auth0`).
+- CI builds and tests every service, builds hardened container images, validates Compose/Helm/Terraform/Ansible, deploys the full chart to Kubernetes with health and rolling-upgrade checks, and publishes the demo to GitHub Pages. See [the workflows documentation](.github/workflows/README.md).
 
 ## Architecture
 
-The system is built as a set of loosely coupled microservices (see comprehensive class, component, and use-case diagrams in the [`uml/`](uml/) folder):
+| Component | Technology | Responsibility |
+|---|---|---|
+| Client | React, Vite | Profile, matching, and messaging UI |
+| API gateway | NGINX, Lua/OpenID Connect | Routes API traffic and validates Auth0 bearer tokens |
+| User service | Spring Boot | User profiles |
+| Location service | Spring Boot | User locations |
+| Matching service | Spring Boot | Match workflows and history |
+| GenAI service | FastAPI | Deterministic candidate ranking by default; optional Open WebUI adapter |
+| Messaging service | Spring Boot, WebSocket/STOMP | Contacts and real-time messages |
+| Persistence | PostgreSQL | Service data |
+| Observability | Prometheus, Grafana | Metrics and dashboards |
 
-| Service            | Technology Stack        | Port | Description                              |
-|--------------------|------------------------|------|------------------------------------------|
-| client             | React + NGINX          | 3000 | Frontend web app                         |
-| user-service       | Spring Boot (Java)     | 8080 | User profiles, auth, matching            |
-| location-service   | Spring Boot (Java)     | 8081 | Location data, geospatial logic          |
-| matching-service   | Spring Boot (Java)     | 8083 | Match history persistence, ranking |
-| genai              | FastAPI (Python)       | 8000 | AI/LLM matching             |
-| messaging-service  | Spring Boot (Java)     | 8082 | Messaging, WebSocket                     |
-| api-gateway        | NGINX + Lua            | 80   | API gateway, JWT, proxy            |
-| db                 | PostgreSQL             | 5432 | Data storage and persistence                             |
-| grafana            | Grafana                | 3001 | Monitoring dashboard                     |
-| prometheus         | Prometheus             | 9090 | Metrics collection and monitoring         |
+## Security model
 
----
-## Microservices Documentation
+- **Browser → gateway.** The NGINX gateway validates the Auth0 JWT (RS256, signature + issuer/audience/expiry) using `lua-resty-openidc`. On success it strips any client-supplied identity headers and injects `X-User-Id` with the verified token `sub`. Unauthenticated or invalid requests get `401`. For local development, `AUTH_MODE=dev` instead accepts `dev-<subject>` bearer tokens so the stack runs without an Auth0 tenant; production deployments leave the default `auth0` mode.
+- **Gateway → services.** Spring controllers treat `X-User-Id` as the authenticated identity and reject requests whose path/query/body user ID does not match it (`403`). The header only reaches services from the gateway; direct client injection is stripped.
+- **Service → service.** Internal calls authenticate with a shared `X-Service-Token` (constant-time comparison), injected from `INTERNAL_SERVICE_TOKEN` env or the `internal-service-auth` Kubernetes secret. Endpoints that expose other users' data (e.g. `GET /user`, `GET /location/all`, `/location/nearby`) only accept the service token.
+- **WebSocket.** The SockJS handshake cannot carry an `Authorization` header, so the gateway proxies `/ws` unauthenticated and the messaging service validates the JWT on the STOMP `CONNECT` frame instead (JWKS verified, `sub` becomes the STOMP principal). Messages are delivered to authenticated per-user queues (`/user/queue/messages`), not public conversation topics.
+- **Secrets.** No credentials are committed. `.env.example` documents every variable; Auth0 browser values (`VITE_*`) are public configuration, while `INTERNAL_SERVICE_TOKEN`, database passwords, and Open WebUI keys are secrets. Public client config is injected at container startup via `runtime-config.js`, not baked into the image.
 
-For a detailed overview of every backend microservice, check the aggregated server documentation: [Server](server/README.md)
+## Run the frontend demo
 
+The demo runs standalone and uses synthetic fixture profiles. No Auth0 tenant, LLM API, database, or backend is needed.
 
----
-## Monitoring & Observability
-Our observability stack is based on **Prometheus** + **Grafana**.
-
- **Prometheus** is deployed via Helm and auto-discovers Kubernetes pods using annotations in each Deployment manifest (`prometheus.io/scrape=true`).
- open Grafana on `http://localhost:3001` (or the LoadBalancer URL in the cluster) and import JSON panels.  See the detailed setup guide in [`grafana/README.md`](grafana/README.md).
-
----
-
-## Local Development
-
-**Prerequisites:**
-- Docker & Docker Compose
-- (Optional) Node.js, Python, Java for local builds
-- Create a `.env` file (copy `.env.example`) and fill in the required secrets (Auth0, OpenWebUI) before running any build commands
-
-**Steps:**
 ```bash
-git clone https://github.com/AET-DevOps25/team-evil-jenkins.git
-cd team-evil-jenkins
-cp .env.example .env  # then open .env and fill in the following values:
-# OPENWEBUI_URL=
-# OPENWEBUI_API_KEY=
-# AUTH0_DOMAIN=
-# AUTH0_AUDIENCE=
-# AUTH0_CLIENT_ID=
-# AUTH0_CLIENT_SECRET=
-./build-all.sh
+docker compose -f docker-compose.demo.yml up --build
 ```
-- Access frontend: http://localhost:3000
 
-The `build-all.sh` script will automatically:
-- Build the frontend (client)
-- Build all backend Java services
-- Start Docker Compose with all services
+Open <http://localhost:3000>. Profile edits, matches, contacts, and messages are stored in this browser's local storage. Do not enter real personal information in the demo.
 
-You only need to run this script after a fresh clone or when dependencies change.
+Stop it with `Ctrl+C`. This demo Compose file does not use or remove data volumes from the full-stack Compose setup.
 
+### Hosted demo on GitHub Pages
 
+The `deploy_demo.yml` workflow builds the demo client and publishes it to GitHub Pages at `https://<owner>.github.io/<repo>/` on every `main` push that touches `client/`. Setup:
 
----
+1. Enable **Settings → Pages → Build and deployment → GitHub Actions** in the repository.
+2. Set repository variables (**Settings → Secrets and variables → Actions → Variables**): `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_AUDIENCE`. Optionally set `DEMO_AUTH_MODE=demo` to remove the sign-in gate entirely.
+3. In the Auth0 application settings, add `https://<owner>.github.io/<repo>/callback` to **Allowed Callback URLs**, and `https://<owner>.github.io/<repo>/` to **Allowed Logout URLs** and **Allowed Web Origins**.
 
-## NGINX API Gateway
+## Run the full local stack
 
-For details on our centralized gateway (routing, JWT validation, CORS, WebSockets), see the dedicated [nginx/README.md](nginx/README.md).
+Requirements: Docker and Docker Compose. No external accounts are needed — local runs use `AUTH_MODE=dev`, where the gateway accepts `dev-<subject>` bearer tokens and the frontend signs in as a synthetic local user. A hosted LLM is not required; deterministic matching is the default.
 
----
-## Actions Pipeline
+```bash
+cp .env.example .env   # local-only passwords are pre-filled with placeholders
+docker compose up --build
+```
 
-Our GitHub Actions workflow provides a zero-touch CI/CD path from push to production:
+The client is available at <http://localhost:3000>; the gateway is at <http://localhost:80>. Database, admin, metrics, and dashboard ports are bound to loopback for local development. PostgreSQL initialization scripts run only when its data volume is first created.
 
-1. **Build Docker Images** – on every push or pull-request, this job builds multi-arch images for all services and pushes them to GitHub Container Registry (GHCR).
-2. **Deploy to Kubernetes via Helm** – once the build job completes successfully on the `main` branch, a `workflow_run` trigger launches this job. It pulls the freshly built images and runs `helm upgrade --install`, using a base-64-encoded kubeconfig stored in repository secrets.
+For real authentication, set `AUTH_MODE=auth0` and fill in the `AUTH0_*` values in `.env` for a tenant you control. Keep `.env` private and never commit it.
 
-Both workflows can also be executed manually from the Actions tab if needed. For YAML specifics, see the files in `.github/workflows/` or the aggregated [CI/CD setup guide](.github/workflows/README.md).
+To run the GenAI matching tests from the repository root:
 
-## Kubernetes & Cloud Deployment
-**Kubernetes (Helm):**
-- Prerequisites: `kubectl`, `helm`, AWS CLI (for cloud)
-- Deploy:
-  ```bash
-  helm upgrade --install team-evil-jenkins ./helm/team-evil-jenkins -n team-evil-jenkins
-  ```
-- For AWS: see [`terraform/README.md`](terraform/README.md) 
+```bash
+python -m pip install -r genai/requirements.txt
+PYTHONPATH=. python -m pytest genai/tests
+```
 
+To run Java service tests:
 
-### Helm Chart Structure & Deployment Process
+```bash
+cd server
+./gradlew test
+```
 
-Our project uses a custom Helm chart to deploy all microservices and infrastructure components in a single command. The chart is located at `helm/team-evil-jenkins` and includes:
+To lint/build the client:
 
-- **Chart.yaml**: Helm chart metadata and version info.
-- **values.yaml**: Central configuration for image tags, service settings, environment variables, and resource limits.
-- **templates/**: Contains all Kubernetes manifests as parameterized templates, including:
-    - Deployments and Services for each microservice (`client`, `user-service`, `location-service`, `matching-service`, `messaging-service`, `genai`)
-    - NGINX API gateway deployment, service, and ConfigMap for custom `nginx.conf`
-    - Postgres StatefulSet and initialization
-    - Ingress resource for external access 
-    - Monitoring: Deployments and Services for Grafana and Prometheus
+```bash
+cd client
+npm ci
+npm run lint
+npm run build
+```
 
+## DevOps and infrastructure
 
-**How it works:**
-- Running the Helm command will create/update all deployments, services, and configs in the target namespace.
-- NGINX is configured as an API gateway and reverse proxy for all backend services, with CORS and JWT validation handled via Lua scripts.
-- Monitoring tools (Grafana, Prometheus) are deployed for observability.
+The repository contains GitHub Actions, Docker Compose, Helm, Terraform, and Ansible configurations. The pipeline builds and tests every service, validates Helm and IaC, deploys the full Helm release to Kubernetes, and verifies health and rolling upgrades. Terraform and Ansible provision and configure the stack on AWS.
 
+## Further documentation
 
----
-
-
-
+- [GenAI matching service](genai/README.md)
+- [Java services](server/README.md)
+- [NGINX gateway](nginx/README.md)
+- [Terraform](terraform/README.md)

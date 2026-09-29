@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Header from '../components/Header';
 import '../styles/MessagesPage.css';
-import { useAuth0 } from '@auth0/auth0-react';
-import { useNotification } from '../contexts/NotificationContext';
+import { useAuth } from '../auth/AuthContext';
+import { useNotification } from '../contexts/useNotification';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import { API_URL, WS_URL, isDemoMode, apiFetch } from '../config';
 /*
        id: 1,
        name: 'Max Johnson',
@@ -52,17 +53,13 @@ import SockJS from 'sockjs-client';
    },
 */
 
-// API URL configuration for different environments
-// Docker: Frontend on :3000, nginx gateway on :80
-// Kubernetes: Frontend and API on separate domains
-const API_URL = (window.location.hostname === 'localhost' ? 'http://localhost:80' : `https://api.${window.location.hostname}`);
 
 const MessagesPage = () => {
     const [conversations, setConversations] = useState([]);
     const [selectedId, setSelectedId] = useState(null);
     const [input, setInput] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const { user, getAccessTokenSilently } = useAuth0();
+    const { user, getAccessTokenSilently } = useAuth();
     const { notify } = useNotification();
     const stompClientRef = useRef(null);
     const subscriptionsRef = useRef(new Map());
@@ -88,7 +85,9 @@ const MessagesPage = () => {
 
     // WebSocket connection setup
     useEffect(() => {
-        if (!user) return;
+        if (!user || isDemoMode) return;
+
+        const subscriptions = subscriptionsRef.current;
 
         const connectWebSocket = async () => {
             try {
@@ -96,13 +95,13 @@ const MessagesPage = () => {
 
                 const client = new Client({
                     webSocketFactory: () => {
-                        const sockjs = new SockJS(`${API_URL}/ws`);
+                        const sockjs = new SockJS(WS_URL);
                         return sockjs;
                     },
                     connectHeaders: {
                         Authorization: `Bearer ${token}`
                     },
-                    debug: (str) => console.log('STOMP Debug:', str),
+                    debug: import.meta.env.DEV ? (str) => console.log('STOMP Debug:', str) : () => {},
                     reconnectDelay: 5000,
                     heartbeatIncoming: 4000,
                     heartbeatOutgoing: 4000,
@@ -112,8 +111,40 @@ const MessagesPage = () => {
                 });
 
                 client.onConnect = () => {
-                    console.log('WebSocket connected');
                     stompClientRef.current = client;
+                    const subscription = client.subscribe('/user/queue/messages', (message) => {
+                        const newMessage = JSON.parse(message.body);
+                        const otherUserId = newMessage.fromUserId === user.sub
+                            ? newMessage.toUserId
+                            : newMessage.fromUserId;
+                        const messageObj = {
+                            id: newMessage.id,
+                            from: newMessage.fromUserId === user.sub ? 'me' : 'them',
+                            text: newMessage.content,
+                            time: new Date(newMessage.timestamp).toLocaleTimeString([], {
+                                hour: 'numeric',
+                                minute: '2-digit'
+                            }),
+                        };
+                        setConversations((prev) =>
+                            prev.map((conversation) => {
+                                if (conversation.id !== otherUserId) return conversation;
+                                const exists = conversation.messages.some((existing) =>
+                                    existing.id === messageObj.id ||
+                                    (existing.text === messageObj.text &&
+                                        existing.time === messageObj.time &&
+                                        existing.from === messageObj.from)
+                                );
+                                return exists ? conversation : {
+                                    ...conversation,
+                                    messages: [...conversation.messages, messageObj],
+                                    last: newMessage.content,
+                                    lastTime: 'now',
+                                };
+                            })
+                        );
+                    });
+                    subscriptions.set('messages', subscription);
                 };
 
                 client.onStompError = (frame) => {
@@ -133,84 +164,20 @@ const MessagesPage = () => {
         connectWebSocket();
 
         return () => {
+            subscriptions.forEach((subscription) => subscription.unsubscribe());
+            subscriptions.clear();
             if (stompClientRef.current) {
                 stompClientRef.current.deactivate();
             }
         };
     }, [user, getAccessTokenSilently]);
 
-    // Subscribe to conversation updates when selectedId changes
-    useEffect(() => {
-        if (!selectedId || !user || !stompClientRef.current?.connected) return;
-
-        const conversationId = buildConversationId(user.sub, selectedId);
-        const topic = `/topic/conversation.${conversationId}`;
-
-        // Unsubscribe from previous conversation
-        const existingSubscription = subscriptionsRef.current.get('current');
-        if (existingSubscription) {
-            existingSubscription.unsubscribe();
-        }
-
-        // Subscribe to new conversation
-        const subscription = stompClientRef.current.subscribe(topic, (message) => {
-            const newMessage = JSON.parse(message.body);
-
-            // Add the new message to the conversation
-            setConversations((prev) =>
-                prev.map((c) => {
-                    if (c.id === selectedId) {
-                        const messageObj = {
-                            from: newMessage.fromUserId === user.sub ? 'me' : 'them',
-                            text: newMessage.content,
-                            time: new Date(newMessage.timestamp).toLocaleTimeString([], {
-                                hour: 'numeric',
-                                minute: '2-digit'
-                            }),
-                        };
-
-                        // Check if message already exists to avoid duplicates
-                        const messageExists = c.messages.some(m =>
-                            m.text === messageObj.text &&
-                            m.time === messageObj.time &&
-                            m.from === messageObj.from
-                        );
-
-                        if (!messageExists) {
-                            return {
-                                ...c,
-                                messages: [...c.messages, messageObj],
-                                last: newMessage.content,
-                                lastTime: 'now'
-                            };
-                        }
-                    }
-                    return c;
-                })
-            );
-        });
-
-        subscriptionsRef.current.set('current', subscription);
-
-        return () => {
-            if (subscription) {
-                subscription.unsubscribe();
-                subscriptionsRef.current.delete('current');
-            }
-        };
-    }, [selectedId, user]);
-
-    // Helper function to build conversation ID (same as backend)
-    const buildConversationId = (userA, userB) => {
-        return userA.localeCompare(userB) < 0 ? `${userA}-${userB}` : `${userB}-${userA}`;
-    };
-
     // Load contacts on mount
     React.useEffect(() => {
         const loadContacts = async () => {
             try {
                 const token = await getAccessTokenSilently();
-                const response = await fetch(`${API_URL}/messaging/contacts/${encodeURIComponent(user.sub)}`, {
+                const response = await apiFetch(`${API_URL}/messaging/contacts/${encodeURIComponent(user.sub)}`, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
                 if (!response.ok) throw new Error(`Contacts fetch failed: ${response.status}`);
@@ -246,7 +213,7 @@ const MessagesPage = () => {
                 url.searchParams.append('userB', selectedId);
                 url.searchParams.append('page', '0');
                 url.searchParams.append('size', '100');
-                const response = await fetch(url, {
+                const response = await apiFetch(url, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (!response.ok) throw new Error('conv fetch');
@@ -295,7 +262,7 @@ const MessagesPage = () => {
         // POST to backend
         try {
             const token = await getAccessTokenSilently();
-            await fetch(`${API_URL}/messaging/send`, {
+            await apiFetch(`${API_URL}/messaging/send`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

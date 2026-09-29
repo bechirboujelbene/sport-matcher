@@ -60,12 +60,42 @@ class MessagingControllerTest {
 
         // When & Then
         mockMvc.perform(post("/messaging/send")
+                        .header("X-User-Id", "user1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(mapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.fromUserId", is("user1")))
                 .andExpect(jsonPath("$.toUserId", is("user2")))
                 .andExpect(jsonPath("$.content", is("Hello World")));
+    }
+
+    @Test
+    @DisplayName("POST /messaging/send rejects missing identity")
+    void sendMessageRejectsMissingIdentity() throws Exception {
+        SendMessageRequest request = new SendMessageRequest();
+        request.setFromUserId("user1");
+        request.setToUserId("user2");
+        request.setContent("Hello World");
+
+        mockMvc.perform(post("/messaging/send")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(request)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("POST /messaging/send rejects sender spoofing")
+    void sendMessageRejectsSenderSpoofing() throws Exception {
+        SendMessageRequest request = new SendMessageRequest();
+        request.setFromUserId("user1");
+        request.setToUserId("user2");
+        request.setContent("Hello World");
+
+        mockMvc.perform(post("/messaging/send")
+                        .header("X-User-Id", "attacker")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -83,6 +113,7 @@ class MessagingControllerTest {
 
         // When & Then
         mockMvc.perform(get("/messaging/conversation")
+                        .header("X-User-Id", "user1")
                         .param("userA", "user1")
                         .param("userB", "user2")
                         .param("page", "0")
@@ -92,6 +123,16 @@ class MessagingControllerTest {
                 .andExpect(jsonPath("$.totalElements", is(2)))
                 .andExpect(jsonPath("$.content[0].content", is("Hi")))
                 .andExpect(jsonPath("$.content[1].content", is("Hello")));
+    }
+
+    @Test
+    @DisplayName("GET /messaging/conversation rejects another user's conversation")
+    void getConversationRejectsOtherUsers() throws Exception {
+        mockMvc.perform(get("/messaging/conversation")
+                        .header("X-User-Id", "attacker")
+                        .param("userA", "user1")
+                        .param("userB", "user2"))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -105,6 +146,7 @@ class MessagingControllerTest {
 
         // When & Then
         mockMvc.perform(post("/messaging/contact")
+                        .header("X-User-Id", "user1")
                         .param("userId", "user1")
                         .param("contactId", "user2"))
                 .andExpect(status().isOk())
@@ -124,11 +166,20 @@ class MessagingControllerTest {
         Mockito.when(messagingService.getContacts("user1")).thenReturn(contacts);
 
         // When & Then
-        mockMvc.perform(get("/messaging/contacts/user1"))
+        mockMvc.perform(get("/messaging/contacts/user1")
+                        .header("X-User-Id", "user1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
                 .andExpect(jsonPath("$[0].id", is("user2")))
                 .andExpect(jsonPath("$[1].id", is("user3")));
+    }
+
+    @Test
+    @DisplayName("GET /messaging/contacts/{userId} rejects another user's contacts")
+    void getContactsRejectsMismatchedIdentity() throws Exception {
+        mockMvc.perform(get("/messaging/contacts/user1")
+                        .header("X-User-Id", "attacker"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

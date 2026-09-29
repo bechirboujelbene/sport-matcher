@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNotification } from '../contexts/NotificationContext';
+import { useNotification } from '../contexts/useNotification';
 import '../styles/LandingPage.css';
 
 const ContactSection = () => {

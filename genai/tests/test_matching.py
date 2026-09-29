@@ -1,40 +1,55 @@
 from fastapi.testclient import TestClient
+
 from genai.app import app
-import pytest
+
 
 client = TestClient(app)
 
-@pytest.fixture(autouse=True)
-def patch_rank_candidates(monkeypatch):
-    def fake_rank_candidates(user, candidates, top_k=None):
-        return [
+
+def test_match_endpoint_returns_deterministic_matches():
+    payload = {
+        "user": {
+            "id": "u0",
+            "name": "Alice",
+            "sportInterests": ["Tennis", "Hiking"],
+            "bio": "Weekend hiking and outdoor training",
+            "skillLevel": "Intermediate",
+        },
+        "candidates": [
             {
                 "id": "u1",
-                "score": 0.92,
-                "explanation": "Both enjoy tennis",
-                "common_preferences": ["Tennis"]
-            }
-        ]
-    import genai.matching_engine
-    monkeypatch.setattr(genai.matching_engine.openwebui_client, "rank_candidates", fake_rank_candidates)
-
-def test_match_endpoint_returns_matches():
-    payload = {
-        "user": {"id": "u0", "name": "Alice", "sportInterests": ["Tennis", "Hiking"], "bio": "", "skillLevel": ""},
-        "candidates": [
-            {"id": "u1", "name": "Bob", "sportInterests": ["Tennis", "Swimming"], "bio": "", "skillLevel": ""},
-            {"id": "u2", "name": "Carol", "sportInterests": ["Chess", "Reading"], "bio": "", "skillLevel": ""}
-        ]
+                "name": "Bob",
+                "sportInterests": ["Tennis", "Hiking"],
+                "bio": "Outdoor hiking on weekends",
+                "skillLevel": "Intermediate",
+            },
+            {
+                "id": "u2",
+                "name": "Carol",
+                "sportInterests": ["Chess", "Reading"],
+                "bio": "Indoor games",
+                "skillLevel": "Beginner",
+            },
+        ],
     }
+
     response = client.post("/genai/match", json=payload)
+
     assert response.status_code == 200
-    data = response.json()
-    assert "matches" in data
-    assert isinstance(data["matches"], list)
-    if data["matches"]:
-        match = data["matches"][0]
-        assert "id" in match
-        assert "score" in match
-        assert "explanation" in match
-        assert "common_preferences" in match
-        assert isinstance(match["common_preferences"], list)
+    matches = response.json()["matches"]
+    assert [match["id"] for match in matches] == ["u1", "u2"]
+    assert matches[0]["score"] > matches[1]["score"]
+    assert matches[0]["common_preferences"] == ["Hiking", "Tennis"]
+    assert "shared sports" in matches[0]["explanation"]
+
+
+def test_match_endpoint_rejects_empty_candidates():
+    response = client.post(
+        "/genai/match",
+        json={
+            "user": {"id": "u0", "sportInterests": []},
+            "candidates": [],
+        },
+    )
+
+    assert response.status_code == 400

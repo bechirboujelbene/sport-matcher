@@ -30,7 +30,7 @@ spec:
             - containerPort: 5432
           envFrom:
             - secretRef:
-                name: postgres-secret
+                name: {{ .Values.postgres.secretName }}
           volumeMounts:
             - name: postgres-init-scripts
               mountPath: /docker-entrypoint-initdb.d

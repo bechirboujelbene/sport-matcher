@@ -8,6 +8,7 @@ import messagingservice.entity.ContactEntity;
 import messagingservice.dto.ContactDto;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -43,8 +44,10 @@ public class MessagingService {
         MessageEntity entity = new MessageEntity(fromUserId, toUserId, content, LocalDateTime.now());
         MessageEntity saved = messageRepository.save(entity);
         MessageDto dto = toDto(saved);
-        String convId = buildConversationId(fromUserId, toUserId);
-        messagingTemplate.convertAndSend("/topic/conversation." + convId, dto);
+        messagingTemplate.convertAndSendToUser(fromUserId, "/queue/messages", dto);
+        if (!fromUserId.equals(toUserId)) {
+            messagingTemplate.convertAndSendToUser(toUserId, "/queue/messages", dto);
+        }
         return dto;
     }
 
@@ -56,13 +59,10 @@ public class MessagingService {
         return messageRepository.findConversation(userA, userB, pageable).map(this::toDto);
     }
 
-    private String buildConversationId(String a, String b) {
-        return (a.compareTo(b) < 0 ? a + "-" + b : b + "-" + a);
-    }
-
     /**
      * Add a contact relationship (bidirectional).
      */
+    @Transactional
     public ContactDto addContact(String userId, String contactId) {
         if (!contactRepository.existsByUserIdAndContactId(userId, contactId)) {
             ContactEntity c1 = new ContactEntity(userId, contactId, LocalDateTime.now());

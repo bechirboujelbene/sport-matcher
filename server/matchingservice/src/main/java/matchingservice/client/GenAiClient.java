@@ -7,19 +7,28 @@ import matchingservice.dto.Candidate;
 import matchingservice.dto.MatchRequest;
 import matchingservice.dto.MatchResponse;
 import matchingservice.dto.RankedMatchDTO;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
+
 @Component
 public class GenAiClient {
 
+    private static final Logger log = LoggerFactory.getLogger(GenAiClient.class);
+
     private final WebClient webClient;
+    private final Duration timeout;
 
     public GenAiClient(WebClient.Builder builder,
-                       @Value("${genai.base-url:http://genai:8000}") String baseUrl) {
+                       @Value("${genai.base-url:http://genai:8000}") String baseUrl,
+                       @Value("${genai.timeout-seconds:15}") long timeoutSeconds) {
         this.webClient = builder.baseUrl(baseUrl).build();
+        this.timeout = Duration.ofSeconds(timeoutSeconds);
     }
 
     /**
@@ -38,12 +47,12 @@ public class GenAiClient {
                     .bodyValue(request)
                     .retrieve()
                     .bodyToMono(MatchResponse.class)
+                    .timeout(timeout)
                     .block();
 
             return response != null ? response.matches() : Collections.emptyList();
         } catch (Exception ex) {
-            // In production use a proper logger
-            System.err.println("Error calling GenAI service: " + ex.getMessage());
+            log.warn("Error calling GenAI service: {}", ex.getMessage());
             return Collections.emptyList();
         }
     }

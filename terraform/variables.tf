@@ -54,4 +54,10 @@ variable "ghcr_pat" {
   description = "GitHub Personal Access Token (PAT) with read:packages scope for GHCR login."
   type        = string
   sensitive   = true
-} 
+}
+
+variable "admin_cidr" {
+  description = "CIDR allowed to reach SSH and admin/monitoring ports (22, 5050, 3001, 9090). Set to your public IP, e.g. \"203.0.113.10/32\". Defaults to loopback so nothing is exposed accidentally."
+  type        = string
+  default     = "127.0.0.1/32"
+}

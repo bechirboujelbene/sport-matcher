@@ -46,12 +46,36 @@ class MatchingControllerTest {
                                 new UserDTO("u1", "Bob", "", "", "", java.util.Map.of(), List.of("Tennis")));
                 Mockito.when(matchingService.findPartners("u0")).thenReturn(mocked);
 
-                mockMvc.perform(post("/matching/partners/u0"))
+                mockMvc.perform(post("/matching/partners/u0")
+                                .header("X-User-Id", "u0"))
                                 .andExpect(status().isOk())
                                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                                 .andExpect(jsonPath("$", hasSize(2)))
                                 .andExpect(jsonPath("$[0].id", is("u2")))
                                 .andExpect(jsonPath("$[1].id", is("u1")));
+        }
+
+        @Test
+        @DisplayName("POST /matching/partners/{userId} rejects missing identity")
+        void partnersEndpointRejectsMissingIdentity() throws Exception {
+                mockMvc.perform(post("/matching/partners/u0"))
+                                .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @DisplayName("POST /matching/partners/{userId} rejects another user's identity")
+        void partnersEndpointRejectsMismatchedIdentity() throws Exception {
+                mockMvc.perform(post("/matching/partners/u0")
+                                .header("X-User-Id", "u1"))
+                                .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("GET /matching/history/{userId} rejects another user's identity")
+        void historyEndpointRejectsMismatchedIdentity() throws Exception {
+                mockMvc.perform(get("/matching/history/u0")
+                                .header("X-User-Id", "u1"))
+                                .andExpect(status().isForbidden());
         }
 
         @Test
@@ -61,7 +85,8 @@ class MatchingControllerTest {
                                 new MatcherDTO("u2", 0.9, "Great hiking match", List.of("Hiking"), Instant.now()));
                 Mockito.when(matchingService.getMatches("u0")).thenReturn(stored);
 
-                mockMvc.perform(get("/matching/history/u0"))
+                mockMvc.perform(get("/matching/history/u0")
+                                .header("X-User-Id", "u0"))
                                 .andExpect(status().isOk())
                                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                                 .andExpect(jsonPath("$", hasSize(1)))

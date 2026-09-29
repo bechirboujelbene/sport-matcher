@@ -5,33 +5,19 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
 
-  changes:
-    name: Detect File Changes
-    runs-on: ubuntu-latest
-    outputs:
-      client: ${{ steps.changed-files.outputs.any_changed }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Check for changes in client directory
-        id: changed-files
-        uses: tj-actions/changed-files@v44
-        with:
-          files: client/**
-
-
-  java-build:
-    name: Build ${{ matrix.service }}
+  java-build-test:
+    name: Build & test ${{ matrix.service }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         service: [userservice, locationservice, matchingservice, messagingservice]
-
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,43 +30,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Get Service Version
-        id: get_version
-        run: |
-          SERVICE_VERSION=$(./gradlew :${{ matrix.service }}:printVersion -q)
-          echo "Discovered version: $SERVICE_VERSION"
-          echo "version=${SERVICE_VERSION}" >> $GITHUB_OUTPUT
-          echo "${SERVICE_VERSION}" > version.txt
-
-        working-directory: ./server
-
-      - name: Build with Gradle
+      - name: Build and test with Gradle
         run: ./gradlew :${{ matrix.service }}:build
         working-directory: ./server
 
-      - name: Run Tests with Gradle
-        run: ./gradlew :${{ matrix.service }}:test
-        working-directory: ./server
-
-      - name: Upload ${{ matrix.service }} Version
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.service }}-version
-          path: server/version.txt
-
-      - name: Upload ${{ matrix.service }} Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.service }}-${{ steps.get_version.outputs.version }}-jar
-          path: server/${{ matrix.service }}/build/libs/*.jar
-
-  
   genai-python-test:
-    name: Test GenAI Python Service
+    name: Test GenAI Python service
     runs-on: ubuntu-latest
-    env:
-      OPENWEBUI_URL: "http://dummy"
-      OPENWEBUI_API_KEY: "dummy-key"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -93,17 +49,17 @@ jobs:
       - name: Run pytest
         run: PYTHONPATH=. pytest genai/tests
 
-  build-react-frontend:
-    name: Build React Frontend
+  client-test:
+    name: Lint & build React client
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: ./client/package-lock.json
 
@@ -111,39 +67,98 @@ jobs:
         run: npm ci
         working-directory: ./client
 
-      - name: Build React app
-        run: |
-          cd ./client
-          # This command builds the new dist directory
-          npm run build
-        env:
-          VITE_AUTH0_DOMAIN: ${{ vars.AUTH0_DOMAIN }}
-          VITE_AUTH0_CLIENT_ID: ${{ secrets.AUTH0_CLIENT_ID }}
-          VITE_AUTH0_AUDIENCE: ${{ vars.AUTH0_AUDIENCE }}
+      - name: Lint
+        run: npm run lint
+        working-directory: ./client
 
-      - name: Upload React Build Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: react-client-build-artifact
-          path: ./client/dist
-          retention-days: 1
+      # The bundle is environment-neutral: Auth0/API/demo settings are injected
+      # at container startup via runtime-config.js, not baked in at build time.
+      - name: Build
+        run: npm run build
+        working-directory: ./client
 
-  publish-client-image:
-    name: Build and publish Client Docker Image
-    needs: build-react-frontend
-    if: always() && needs.build-react-frontend.result == 'success'
+  infra-check:
+    name: Validate Compose, Helm, Terraform & Ansible
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download React Build Artifact
-        uses: actions/download-artifact@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
         with:
-          name: react-client-build-artifact
-          path: ./client/dist
+          version: v3.14.4
 
-      - name: Log in to the Container registry
+      - name: Helm lint
+        run: helm lint helm/team-evil-jenkins
+
+      - name: Helm template renders
+        run: |
+          helm template sport-matcher helm/team-evil-jenkins \
+            --set internalAuth.token=ci-dummy-token \
+            --set postgres.password=ci-dummy-password > /dev/null
+
+      - name: Validate Compose files
+        run: |
+          cp .env.example .env
+          docker compose --env-file .env config -q
+          docker compose -f docker-compose.demo.yml config -q
+          docker compose -f ansible/docker-compose.yml --env-file .env config -q
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.12.1
+
+      - name: Terraform fmt
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      - name: Terraform init & validate
+        run: |
+          terraform -chdir=terraform init -backend=false
+          terraform -chdir=terraform validate
+
+      - name: Install Ansible
+        run: pip install ansible-core
+
+      - name: Ansible syntax check
+        run: ansible-playbook --syntax-check ansible/playbook.yml -i ansible/inventory.ini
+
+  publish-images:
+    name: Build & publish ${{ matrix.service.name }}
+    needs: [java-build-test, genai-python-test, client-test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: client
+            context: ./client
+            dockerfile: ./client/Dockerfile
+          - name: user-service
+            context: ./server
+            dockerfile: ./server/userservice/Dockerfile
+          - name: location-service
+            context: ./server
+            dockerfile: ./server/locationservice/Dockerfile
+          - name: matching-service
+            context: ./server
+            dockerfile: ./server/matchingservice/Dockerfile
+          - name: messaging-service
+            context: ./server
+            dockerfile: ./server/messagingservice/Dockerfile
+          - name: genai
+            context: ./genai
+            dockerfile: ./genai/Dockerfile
+          - name: nginx-gateway
+            context: ./nginx
+            dockerfile: ./nginx/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -156,141 +171,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/client
+          images: ghcr.io/${{ github.repository }}/${{ matrix.service.name }}
           tags: |
             type=sha,format=short
             type=ref,event=branch
             type=ref,event=pr
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker Image
-        uses: docker/build-push-action@v5
+      # PRs only prove the image builds; pushes publish to GHCR.
+      - name: Build (and push) image
+        uses: docker/build-push-action@v6
         with:
-          context: ./client
-          file: ./client/Dockerfile
-          push: true
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-  publish-docker-images:
-
-    name: Build and publish Docker Images
-    needs: [java-build, genai-python-test]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service_config:
-          - name: location-service    
-            path: ./server/locationservice
-            jar_download_target_dir: server/locationservice/build/libs
-            gradle_project_name: locationservice
-
-          - name: user-service   
-            path: ./server/userservice
-            jar_download_target_dir: server/userservice/build/libs
-            gradle_project_name: userservice
-          
-          - name: matching-service
-            path: ./server/matchingservice
-            jar_download_target_dir: server/matchingservice/build/libs
-            gradle_project_name: matchingservice
-
-          - name: genai
-            path: ./genai
-            jar_download_target_dir: ""
-            gradle_project_name: ""
-
-          - name: messaging-service
-            path: ./server/messagingservice
-            jar_download_target_dir: server/messagingservice/build/libs
-            gradle_project_name: messagingservice
-
-          - name: nginx-gateway
-            path: ./nginx
-            jar_download_target_dir: ""
-            gradle_project_name: ""
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download Version artifact
-        if: matrix.service_config.gradle_project_name
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.service_config.gradle_project_name }}-version
-          path: /tmp/version-info
-
-      - name: Read Version from file
-        if: matrix.service_config.gradle_project_name
-        id: get_version
-        run: |
-          SERVICE_VERSION=$(cat /tmp/version-info/version.txt)
-          echo "Using version from build job: $SERVICE_VERSION"
-          echo "version=${SERVICE_VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Download JAR artifact
-        if: matrix.service_config.gradle_project_name
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.service_config.gradle_project_name }}-${{ steps.get_version.outputs.version }}-jar
-          path: ${{ matrix.service_config.jar_download_target_dir }}
-
-      - name: Download React Build Artifact
-        if: matrix.service_config.is_client
-        uses: actions/download-artifact@v4
-        with:
-          name: react-client-build-artifact
-          path: ./client/dist
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
-
-      - name: Install Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v3
-    
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}/${{ matrix.service_config.name }}
-          tags: |
-            # Use Gradle version for Java services, e.g., 0.0.1-SNAPSHOT
-            type=raw,value=${{ steps.get_version.outputs.version }},enable=${{ matrix.service_config.gradle_project_name != '' }}
-            # Git short commit hash (e.g., a1b2c3d)
-            type=sha,format=short
-            # Git branch name
-            type=ref,event=branch
-            # Pull Request number
-            type=ref,event=pr
-            # latest tag on default branch
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Docker Image
-        uses: docker/build-push-action@v5
-        with:
-          platforms: linux/amd64,linux/arm64
-          context: ./${{ matrix.service_config.path }}
-          file: ./${{ matrix.service_config.path }}/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: ${{ matrix.service_config.name == 'nginx-gateway' && 'type=registry,ref=ghcr.io/aet-devops25/team-evil-jenkins/nginx-gateway:buildcache' || '' }}
-          cache-to: ${{ matrix.service_config.name == 'nginx-gateway' && 'type=registry,ref=ghcr.io/aet-devops25/team-evil-jenkins/nginx-gateway:buildcache,mode=max' || '' }}
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}

@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
+import { useAuth } from '../auth/AuthContext';
 
 export default function SignInPage() {
-    const { loginWithRedirect, isLoading } = useAuth0();
+    const { loginWithRedirect, isLoading } = useAuth();
 
     useEffect(() => {
         loginWithRedirect();

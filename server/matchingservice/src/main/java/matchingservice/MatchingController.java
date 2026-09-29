@@ -3,13 +3,16 @@ package matchingservice;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestHeader;
 
+import model.AuthHeaders;
 import model.UserDTO;
 import model.MatcherDTO;
 
@@ -36,8 +39,16 @@ public class MatchingController {
     })
     @PostMapping("/partners/{userId}")
     public ResponseEntity<List<UserDTO>> findPartners(
-            @Parameter(description = "ID of user requesting partner") @PathVariable String userId) {
-        return ResponseEntity.ok(matchingService.findPartners(userId));
+            @Parameter(description = "ID of user requesting partner") @PathVariable String userId,
+            @RequestHeader(value = AuthHeaders.USER_ID, required = false) String authenticatedUserId) {
+        if (!AuthHeaders.isAuthenticatedUser(authenticatedUserId)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (!AuthHeaders.isSameUser(authenticatedUserId, userId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        List<UserDTO> partners = matchingService.findPartners(userId);
+        return partners != null ? ResponseEntity.ok(partners) : ResponseEntity.notFound().build();
     }
 
     @Operation(summary = "Get previous matches for user")
@@ -46,7 +57,14 @@ public class MatchingController {
     })
     @GetMapping("/history/{userId}")
     public ResponseEntity<List<MatcherDTO>> getMatches(
-            @Parameter(description = "ID of user") @PathVariable String userId) {
+            @Parameter(description = "ID of user") @PathVariable String userId,
+            @RequestHeader(value = AuthHeaders.USER_ID, required = false) String authenticatedUserId) {
+        if (!AuthHeaders.isAuthenticatedUser(authenticatedUserId)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (!AuthHeaders.isSameUser(authenticatedUserId, userId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         return ResponseEntity.ok(matchingService.getMatches(userId));
     }
 }

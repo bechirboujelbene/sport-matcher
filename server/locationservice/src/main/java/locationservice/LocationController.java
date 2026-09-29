@@ -1,7 +1,10 @@
 package locationservice;
 
+import model.AuthHeaders;
 import model.LocationDTO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
@@ -22,6 +25,9 @@ public class LocationController {
     private final LocationService locationService;
     private final LocationMapper dtoMapper;
 
+    @Value("${INTERNAL_SERVICE_TOKEN:}")
+    private String internalServiceToken;
+
     @Autowired
     public LocationController(LocationService locationService, LocationMapper locationMapper) {
         this.locationService = locationService;
@@ -41,7 +47,14 @@ public class LocationController {
     public ResponseEntity<LocationDTO> updateLocation(
             @RequestParam String userId,
             @RequestParam double latitude,
-            @RequestParam double longitude) {
+            @RequestParam double longitude,
+            @RequestHeader(value = AuthHeaders.USER_ID, required = false) String authenticatedUserId) {
+        if (!AuthHeaders.isAuthenticatedUser(authenticatedUserId)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (!AuthHeaders.isSameUser(authenticatedUserId, userId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         Location updated = locationService.updateLocation(userId, latitude, longitude);
         return ResponseEntity.ok(dtoMapper.toDTO(updated));
     }
@@ -56,7 +69,14 @@ public class LocationController {
         }
     )
     @GetMapping("/{id}")
-    public ResponseEntity<LocationDTO> getLocation(@PathVariable String id) {
+    public ResponseEntity<LocationDTO> getLocation(
+            @PathVariable String id,
+            @RequestHeader(value = AuthHeaders.USER_ID, required = false) String authenticatedUserId,
+            @RequestHeader(value = AuthHeaders.SERVICE_TOKEN, required = false) String serviceToken) {
+        if (!AuthHeaders.isServiceRequest(internalServiceToken, serviceToken)
+                && !AuthHeaders.isSameUser(authenticatedUserId, id)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         Location location = locationService.getLocation(id);
         return (location != null)
             ? ResponseEntity.ok(dtoMapper.toDTO(location))
@@ -74,7 +94,11 @@ public class LocationController {
     @GetMapping("/nearby")
     public ResponseEntity<List<String>> searchPartnerByArea(
             @RequestParam String userId,
-            @RequestParam double radius) {
+            @RequestParam double radius,
+            @RequestHeader(value = AuthHeaders.SERVICE_TOKEN, required = false) String serviceToken) {
+        if (!AuthHeaders.isServiceRequest(internalServiceToken, serviceToken)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         return ResponseEntity.ok(locationService.searchPartnerByArea(userId, radius));
     }
 
@@ -87,7 +111,11 @@ public class LocationController {
         }
     )
     @GetMapping("/all")
-    public ResponseEntity<List<LocationDTO>> getAllLocations() {
+    public ResponseEntity<List<LocationDTO>> getAllLocations(
+            @RequestHeader(value = AuthHeaders.SERVICE_TOKEN, required = false) String serviceToken) {
+        if (!AuthHeaders.isServiceRequest(internalServiceToken, serviceToken)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         List<Location> locations = locationService.getAll();
         List<LocationDTO> dtos = locations.stream()
                                           .map(dtoMapper::toDTO)

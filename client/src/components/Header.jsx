@@ -1,11 +1,11 @@
 import React from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
+import { useAuth } from '../auth/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { NavLink } from 'react-router-dom';
 import '../styles/LandingPage.css';
 
 const Header = () => {
-    const { isAuthenticated, user, logout, loginWithRedirect } = useAuth0();
+    const { isAuthenticated, user, logout, loginWithRedirect } = useAuth();
     const navigate = useNavigate();
     const authNav = [
         { path: '/home', label: 'Home' },

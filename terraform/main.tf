@@ -43,13 +43,13 @@ resource "aws_security_group" "web_sg" {
     create_before_destroy = true
   }
 
-  # Port for SSH access (for Ansible)
+  # Port for SSH access (for Ansible) - restricted to the operator
   ingress {
     description = "SSH"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.admin_cidr]
   }
 
   # Port for the NGINX reverse proxy (main application entrypoint)
@@ -67,7 +67,7 @@ resource "aws_security_group" "web_sg" {
     from_port   = 5050
     to_port     = 5050
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # For production, restrict this to your IP
+    cidr_blocks = [var.admin_cidr]
   }
 
   # Port for Grafana (optional monitoring tool)
@@ -76,16 +76,16 @@ resource "aws_security_group" "web_sg" {
     from_port   = 3001
     to_port     = 3001
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # For production, restrict this to your IP
+    cidr_blocks = [var.admin_cidr]
   }
-  
+
   # Port for Prometheus (optional monitoring tool)
   ingress {
     description = "Prometheus"
     from_port   = 9090
     to_port     = 9090
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # For production, restrict this to your IP
+    cidr_blocks = [var.admin_cidr]
   }
 
 

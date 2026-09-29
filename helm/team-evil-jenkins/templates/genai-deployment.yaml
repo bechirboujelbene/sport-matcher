@@ -20,8 +20,8 @@ spec:
     spec:
       containers:
         - name: genai
-          image: "{{ .Values.ghcr.registry }}/{{ .Values.ghcr.organization }}/{{ .Values.genai.image.repository }}:{{ .Values.genai.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.genai.image.pullPolicy }}
+          image: "{{ .Values.ghcr.registry }}/{{ .Values.ghcr.organization }}/{{ .Values.ghcr.project }}/{{ .Values.genai.image.repository }}:{{ .Values.genai.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http
               containerPort: 8000
@@ -34,9 +34,25 @@ spec:
             httpGet:
               path: /health
               port: http
-          envFrom:
-            - secretRef:
-                name: genai-secrets
+          env:
+            - name: MATCHING_BACKEND
+              value: {{ .Values.genai.matchingBackend | quote }}
+            - name: GENAI_TOP_K
+              value: {{ .Values.genai.topK | quote }}
+            - name: OPENWEBUI_TIMEOUT
+              value: {{ .Values.genai.openWebui.timeout | quote }}
+            {{- if eq .Values.genai.matchingBackend "openwebui" }}
+            - name: OPENWEBUI_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.genai.openWebui.secretName }}
+                  key: OPENWEBUI_URL
+            - name: OPENWEBUI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.genai.openWebui.secretName }}
+                  key: OPENWEBUI_API_KEY
+            {{- end }}
           resources:
             {{- toYaml .Values.genai.resources | nindent 12 }}
 {{- end }}

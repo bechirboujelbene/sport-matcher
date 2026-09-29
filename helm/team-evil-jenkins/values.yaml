@@ -13,64 +13,100 @@ imagePullSecrets:
   - name: ghcr-creds # This should match the name of the secret you create in Kubernetes
 
 # GHCR image registry
+# Images are published as <registry>/<organization>/<project>/<service>
 ghcr:
   registry: ghcr.io
-  organization: aet-devops25 
+  organization: bechirboujelbene
+  project: sportmatcher
 
 client:
   replicaCount: 1
   image:
-    repository: team-evil-jenkins/client
+    repository: client
     tag: latest 
   service:
     type: ClusterIP 
     port: 80 
+  auth0:
+    domain: ""
+    clientId: ""
+    audience: ""
+  apiUrl: ""
+  wsUrl: ""
+  demoMode: "false"
+  podSecurityContext: {}
+  securityContext: {}
+  resources: {}
 
 userService:
   replicaCount: 1
   image:
-    repository: team-evil-jenkins/user-service
+    repository: user-service
     tag: latest
   service:
     type: ClusterIP
     port: 8080 # Container port
+  podSecurityContext: {}
+  securityContext: {}
+  resources: {}
 
 locationService:
   replicaCount: 1
   image:
-    repository: team-evil-jenkins/location-service
+    repository: location-service
     tag: latest
   service:
     type: ClusterIP
     port: 8080 # Container port 
+  podSecurityContext: {}
+  securityContext: {}
+  resources: {}
 
 messagingService:
   replicaCount: 1
   image:
-    repository: team-evil-jenkins/messaging-service
+    repository: messaging-service
     tag: latest
   service:
     type: ClusterIP
     port: 8080 # Container port
+  allowedOrigins: "http://localhost:3000"
+  podSecurityContext: {}
+  securityContext: {}
+  resources: {}
 
 matchingService:
   replicaCount: 1
   image:
-    repository: team-evil-jenkins/matching-service
+    repository: matching-service
     tag: latest
   service:
     type: ClusterIP
     port: 8080 # Container port
+  podSecurityContext: {}
+  securityContext: {}
+  resources: {}
 
 serviceAccount:
   create: false
   annotations: {}
 
+internalAuth:
+  secretName: internal-service-auth
+  createSecret: false
+  token: ""
+
+postgres:
+  secretName: postgres-secret
+  createSecret: false
+  username: ""
+  password: ""
+
 # Configuration for the Nginx Gateway service
 nginxGateway:
   replicaCount: 1
   image:
-    repository: team-evil-jenkins/nginx-gateway
+    repository: nginx-gateway
     tag: latest
   resources: {}
 
@@ -79,11 +115,18 @@ genai:
   enabled: true
   replicaCount: 1
   image:
-    repository: team-evil-jenkins/genai
+    repository: genai
     tag: latest
   service:
     type: ClusterIP
     port: 8000 # Service port
+  matchingBackend: deterministic
+  topK: 10
+  openWebui:
+    timeout: 30
+    secretName: genai-secrets
+  podSecurityContext: {}
+  securityContext: {}
   resources: {}
 
 
@@ -95,17 +138,17 @@ ingress:
     cert-manager.io/cluster-issuer: letsencrypt-prod
   tls:
     - hosts:
-        - team-evil-jenkins.student.k8s.aet.cit.tum.de
+        - sport-matcher.example.com
       secretName: team-evil-jenkins-tls
     - hosts:
-        - api.team-evil-jenkins.student.k8s.aet.cit.tum.de
+        - api.sport-matcher.example.com
       secretName: team-evil-jenkins-api-tls
   client:
-    host: team-evil-jenkins.student.k8s.aet.cit.tum.de
+    host: sport-matcher.example.com
     path: /
     pathType: Prefix
   api:
-    host: api.team-evil-jenkins.student.k8s.aet.cit.tum.de
+    host: api.sport-matcher.example.com
   
   grafana:
     enabled: false
