@@ -7,7 +7,7 @@ const demoUser = {
   name: 'Demo Alice',
   nickname: 'alice',
   email: 'alice@example.invalid',
-  picture: '/images/avatar1.png',
+  picture: `${import.meta.env.BASE_URL}images/avatar1.png`,
 };
 
 const devUser = {
@@ -15,7 +15,7 @@ const devUser = {
   name: 'Local Dev',
   nickname: 'local-dev',
   email: 'dev@localhost.invalid',
-  picture: '/images/avatar1.png',
+  picture: `${import.meta.env.BASE_URL}images/avatar1.png`,
 };
 
 function Auth0Bridge({ children }) {
@@ -31,7 +31,7 @@ export function AppAuthProvider({ children }) {
       user: AUTH_MODE === 'dev' ? devUser : demoUser,
       getAccessTokenSilently: async () => (AUTH_MODE === 'dev' ? `dev-${devUser.sub}` : ''),
       loginWithRedirect: async () => {},
-      logout: () => window.location.assign('/home'),
+      logout: () => window.location.assign(`${import.meta.env.BASE_URL}home`),
     };
     return <AuthContext.Provider value={localAuth}>{children}</AuthContext.Provider>;
   }

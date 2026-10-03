@@ -228,7 +228,7 @@ function ProfilePage() {
                 {/* Sidebar */}
                 <aside className="profile-sidebar card">
                     <div className="avatar-wrapper">
-                        <img src={form.avatar || '/images/avatar-profile.png'} alt="User avatar" className="avatar-lg" />
+                        <img src={form.avatar || `${import.meta.env.BASE_URL}images/avatar-profile.png`} alt="User avatar" className="avatar-lg" />
                         <span className="status-badge" />
                     </div>
                     <h3 className="user-name">{`${form.firstName} ${form.lastName}`}</h3>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import '../styles/LandingPage.css';
 
 const HeroSection = () => {
@@ -12,14 +13,14 @@ const HeroSection = () => {
             find your next adventure buddy.
           </p>
           <div className="hero-buttons">
-            <a href="/signup" className="btn btn-primary">Get Started</a>
+            <Link to="/signup" className="btn btn-primary">Get Started</Link>
             <a href="#how-it-works" className="btn btn-outline">See How It Works</a>
           </div>
         </div>
         <div className="hero-image">
           {/* Placeholder image ‑ replace src when real image provided */}
           <img
-            src="/images/hero-placeholder.jpg"
+            src={`${import.meta.env.BASE_URL}images/hero-placeholder.jpg`}
             alt="Group of outdoor athletes"
           />
         </div>

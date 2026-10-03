@@ -24,7 +24,7 @@ const Header = () => {
         <header className="header">
             <div className="nav-container">
                 <div className="brand">
-                    <img src="/logo.png" alt="SportMatch logo" className="brand-logo" />
+                    <img src={`${import.meta.env.BASE_URL}logo.png`} alt="SportMatch logo" className="brand-logo" />
                     <span>SportMatch</span>
                 </div>
 

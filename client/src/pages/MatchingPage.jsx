@@ -82,7 +82,7 @@ function MatchingPage() {
               id: h.matchedUserId,
               name: u.name || 'Unknown',
               distance: 0,
-              avatar: u.picture || '/images/default-avatar.png',
+              avatar: u.picture || `${import.meta.env.BASE_URL}images/default-avatar.png`,
               sports: u.sportInterests || [],
               shared: Array.isArray(h.commonPreferences) ? h.commonPreferences.join(', ') : '',
               match: h.score ? Math.round(h.score * 100) : 0,
@@ -157,7 +157,7 @@ function MatchingPage() {
           id: u.id,
           name: u.name,
           distance: 0, // TODO backend distance
-          avatar: u.picture || '/images/default-avatar.png',
+          avatar: u.picture || `${import.meta.env.BASE_URL}images/default-avatar.png`,
           sports: u.sportInterests || [],
           shared: commonMap[u.id]?.join(', ') || '',
           match: scoreMap[u.id] ? Math.round(scoreMap[u.id] * 100) : 0,

@@ -9,7 +9,7 @@ import { API_URL, WS_URL, isDemoMode, apiFetch } from '../config';
 /*
        id: 1,
        name: 'Max Johnson',
-       avatar: '/images/avatar2.png',
+       avatar: `${import.meta.env.BASE_URL}images/avatar2.png`,
        last: "Great! Let's meet at Golden Gate Park at 7 AM",
        lastTime: '2m',
        messages: [
@@ -38,7 +38,7 @@ import { API_URL, WS_URL, isDemoMode, apiFetch } from '../config';
    {
        id: 2,
        name: 'Sarah Chen',
-       avatar: '/images/avatar3.png',
+       avatar: `${import.meta.env.BASE_URL}images/avatar3.png`,
        last: 'The hiking trail was amazing yesterday!',
        lastTime: '1h',
        messages: [],
@@ -46,7 +46,7 @@ import { API_URL, WS_URL, isDemoMode, apiFetch } from '../config';
    {
        id: 3,
        name: 'SF Runners Group',
-       avatar: '/images/icon-group.png',
+       avatar: `${import.meta.env.BASE_URL}images/icon-group.png`,
        last: "Who's joining tomorrow's marathon training?",
        lastTime: '3h',
        messages: [],
@@ -186,7 +186,7 @@ const MessagesPage = () => {
                 const mapped = contacts.map((u) => ({
                     id: u.id,
                     name: `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.name || u.id,
-                    avatar: u.picture || '/images/avatar2.png',
+                    avatar: u.picture || `${import.meta.env.BASE_URL}images/avatar2.png`,
                     last: '',
                     lastTime: '',
                     messages: [],
