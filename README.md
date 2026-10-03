@@ -2,7 +2,7 @@
 
 Sport Matcher connects people who want to take part in outdoor sports. Users build a profile with sports, skill level, availability, and location, then discover compatible partners and message their contacts.
 
-This repository is a fork of the AET-DevOps25 team project and retains its team history. The primary engineering focus here is the delivery and operations path for a containerized microservice application: build, test, package, deploy, and observe the workload reproducibly.
+The primary engineering focus here is the delivery and operations path for a containerized microservice application: build, test, package, deploy, and observe the workload reproducibly.
 
 ## Project status
 
@@ -10,6 +10,13 @@ This repository is a fork of the AET-DevOps25 team project and retains its team 
 - A frontend-only demo uses synthetic data and browser storage; it does not connect to backend services.
 - Local runs authenticate with `AUTH_MODE=dev` — no external accounts required. Production deployments use Auth0 (`AUTH_MODE=auth0`).
 - CI builds and tests every service, builds hardened container images, validates Compose/Helm/Terraform/Ansible, deploys the full chart to Kubernetes with health and rolling-upgrade checks, and publishes the demo to GitHub Pages. See [the workflows documentation](.github/workflows/README.md).
+
+## What I built
+
+- Gateway and security: NGINX gateway with Auth0 JWT validation, verified identity passed to the services, client-supplied identity headers stripped, per-endpoint access checks and an internal token for service-to-service calls
+- Matching: the matching and location services, with deterministic, explainable matching by default and an optional LLM adapter
+- Delivery: Kubernetes deployment with Helm, AWS infrastructure with Terraform and Ansible, and CI that tests every service, validates the infrastructure code and deploys the chart with health checks
+- Demo: the frontend-only demo published to GitHub Pages
 
 ## Architecture
 
@@ -32,6 +39,8 @@ This repository is a fork of the AET-DevOps25 team project and retains its team 
 - **Service → service.** Internal calls authenticate with a shared `X-Service-Token` (constant-time comparison), injected from `INTERNAL_SERVICE_TOKEN` env or the `internal-service-auth` Kubernetes secret. Endpoints that expose other users' data (e.g. `GET /user`, `GET /location/all`, `/location/nearby`) only accept the service token.
 - **WebSocket.** The SockJS handshake cannot carry an `Authorization` header, so the gateway proxies `/ws` unauthenticated and the messaging service validates the JWT on the STOMP `CONNECT` frame instead (JWKS verified, `sub` becomes the STOMP principal). Messages are delivered to authenticated per-user queues (`/user/queue/messages`), not public conversation topics.
 - **Secrets.** No credentials are committed. `.env.example` documents every variable; Auth0 browser values (`VITE_*`) are public configuration, while `INTERNAL_SERVICE_TOKEN`, database passwords, and Open WebUI keys are secrets. Public client config is injected at container startup via `runtime-config.js`, not baked into the image.
+
+- **Network exposure.** Only the gateway is meant to be reachable. Backend services trust `X-User-Id` from the gateway, so their ports are bound to `127.0.0.1` locally (for debugging) and are cluster-internal (`ClusterIP`) in Kubernetes. On the EC2 deployment, pgAdmin, Prometheus and Grafana are bound to localhost; reach them through an SSH tunnel, e.g. `ssh -L 3001:localhost:3001 <host>`.
 
 ## Run the frontend demo
 

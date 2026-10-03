@@ -56,7 +56,7 @@ services:
       context: ./server
       dockerfile: userservice/Dockerfile
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080" # services are reached through the gateway; localhost only for debugging
     environment:
       - SPRING_PROFILES_ACTIVE=development
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/user_service_db
@@ -78,7 +78,7 @@ services:
       context: ./server
       dockerfile: locationservice/Dockerfile
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/location_service_db
       - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER:?POSTGRES_USER is required}
@@ -124,7 +124,7 @@ services:
       context: ./server
       dockerfile: matchingservice/Dockerfile
     ports:
-      - "8083:8080"
+      - "127.0.0.1:8083:8080"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/matching_service_db
       - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER:?POSTGRES_USER is required}

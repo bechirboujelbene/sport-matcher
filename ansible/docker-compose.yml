@@ -155,7 +155,7 @@ services:
     image: dpage/pgadmin4:8.9
     container_name: pgadmin
     ports:
-      - "5050:80"
+      - "127.0.0.1:5050:80" # admin UI: reach via SSH tunnel, never publicly
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:?PGADMIN_DEFAULT_EMAIL is required}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?PGADMIN_DEFAULT_PASSWORD is required}
@@ -168,7 +168,7 @@ services:
     image: prom/prometheus:v2.52.0
     container_name: prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090" # Prometheus has no auth: SSH tunnel only
     volumes:
       - ./prometheus:/etc/prometheus
       - prometheus_data:/prometheus
@@ -182,7 +182,7 @@ services:
     image: grafana/grafana-oss:11.1.0
     container_name: grafana
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000" # Grafana: SSH tunnel only
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
