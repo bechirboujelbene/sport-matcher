@@ -21,6 +21,7 @@ ghcr:
 
 client:
   replicaCount: 1
+  containerPort: 8080
   image:
     repository: client
     tag: latest 

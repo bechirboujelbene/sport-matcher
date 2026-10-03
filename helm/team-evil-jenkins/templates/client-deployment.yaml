@@ -34,7 +34,7 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http
-              containerPort: {{ .Values.client.service.port }}
+              containerPort: {{ .Values.client.containerPort }}
               protocol: TCP
           env:
             - name: VITE_AUTH0_DOMAIN
