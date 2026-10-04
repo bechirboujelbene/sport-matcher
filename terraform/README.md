@@ -26,7 +26,7 @@ This guide explains how to use the Terraform scripts in this directory to provis
 
 1.  **Navigate to the Terraform Directory**:
     ```bash
-    cd /path/to/your/project/team-evil-jenkins/terraform
+    cd sport-matcher/terraform
     ```
     (Or, if you are already in the project root: `cd terraform`)
 

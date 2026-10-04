@@ -4,7 +4,7 @@ Sport Matcher connects people who want to take part in outdoor sports. Users bui
 
 The primary engineering focus here is the delivery and operations path for a containerized microservice application: build, test, package, deploy, and observe the workload reproducibly.
 
-## Project status
+## Highlights
 
 - The matching service defaults to a deterministic, explainable algorithm with no external LLM dependency.
 - A frontend-only demo uses synthetic data and browser storage; it does not connect to backend services.
